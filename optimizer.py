@@ -9,6 +9,62 @@ from utils import utils_calc as ucalc
 from utils import utils_torch as utorch
 
 
+def _seg_seg_dist_and_grad_np(a0, a1, b0, b1, eps=1e-8):
+    """Batched numpy: minimum distance + analytical gradients for N segment pairs.
+    Args: a0, a1, b0, b1 — shape (N, 3) numpy arrays
+    Returns: dists (N,), grad_a0 (N,3), grad_a1 (N,3), grad_b0 (N,3), grad_b1 (N,3)
+    Gradients are d(dist)/d(endpoint), ignoring clamping boundary (valid in smooth interior).
+    """
+    da = a1 - a0
+    db = b1 - b0
+    dc = b0 - a0
+    aa = (da * da).sum(-1)
+    bb = (db * db).sum(-1)
+    ab = (da * db).sum(-1)
+    ac = (da * dc).sum(-1)
+    bc = (db * dc).sum(-1)
+    denom = aa * bb - ab * ab
+    s = np.clip((ac * bb - ab * bc) / (denom + eps), 0.0, 1.0)
+    t = np.clip((ac * ab - aa * bc) / (denom + eps), 0.0, 1.0)
+    closest_a = a0 + s[:, None] * da
+    closest_b = b0 + t[:, None] * db
+    diff = closest_a - closest_b
+    dist = np.sqrt((diff * diff).sum(-1) + eps)
+    unit = diff / dist[:, None]
+    return (
+        dist,
+        unit * (1 - s)[:, None],   # grad_a0
+        unit * s[:, None],          # grad_a1
+        -unit * (1 - t)[:, None],   # grad_b0
+        -unit * t[:, None],         # grad_b1
+    )
+
+
+def _seg_seg_dist_batch(a0: torch.Tensor, a1: torch.Tensor,
+                        b0: torch.Tensor, b1: torch.Tensor,
+                        eps: float = 1e-8) -> torch.Tensor:
+    """Batched differentiable minimum distance between N pairs of 3D line segments.
+    Args:
+        a0, a1, b0, b1: shape (N, 3)
+    Returns:
+        distances shape (N,) — differentiable w.r.t. all inputs
+    """
+    da = a1 - a0          # (N, 3)
+    db = b1 - b0
+    dc = b0 - a0
+    aa = (da * da).sum(-1)  # (N,)
+    bb = (db * db).sum(-1)
+    ab = (da * db).sum(-1)
+    ac = (da * dc).sum(-1)
+    bc = (db * dc).sum(-1)
+    denom = aa * bb - ab * ab
+    s = torch.clamp((ac * bb - ab * bc) / (denom + eps), 0.0, 1.0)
+    t = torch.clamp((ac * ab - aa * bc) / (denom + eps), 0.0, 1.0)
+    closest_a = a0 + s.unsqueeze(-1) * da   # (N, 3)
+    closest_b = b0 + t.unsqueeze(-1) * db
+    return torch.norm(closest_a - closest_b + eps, dim=-1)  # (N,)
+
+
 class RetargetOptimizer:
     retargeting_type = "BASE"
 
@@ -72,8 +128,8 @@ class RetargetOptimizer:
         try:
             x_opt = self.opt.optimize(x_init)
             qpos_doa = x_opt
-        except ValueError as e:
-            print(e)
+        except (ValueError, nlopt.RoundoffLimited) as e:
+            print(f"[optimizer] {type(e).__name__}: {e}")
             qpos_doa = x_init
 
         qpos_doa = np.clip(qpos_doa, self.joint_limits[:, 0], self.joint_limits[:, 1])
@@ -1000,6 +1056,105 @@ class VectorWristOptimizer(RetargetOptimizer):
         return objective
 
 
+def _mesh_bounding_capsule_radius(mesh_path: str) -> float:
+    """Load a collision mesh and compute the bounding capsule radius via PCA.
+
+    Finds the principal axis of the mesh (longest dimension via PCA),
+    then returns the maximum perpendicular distance from any vertex to that axis.
+    This gives the tightest cylindrical bound around the mesh's main axis.
+    Returns 0.0 on failure (missing file, bad mesh, etc.).
+    """
+    try:
+        import trimesh
+        mesh = trimesh.load(mesh_path, force="mesh")
+        vertices = np.array(mesh.vertices, dtype=np.float64)
+    except Exception:
+        return 0.0
+
+    if len(vertices) < 2:
+        return 0.0
+
+    # PCA: eigenvector of largest eigenvalue = principal axis (longest dimension)
+    centroid = vertices.mean(axis=0)
+    d = vertices - centroid
+    _, eigenvectors = np.linalg.eigh(d.T @ d)
+    axis = eigenvectors[:, -1]  # (3,) unit vector
+
+    # Max perpendicular distance from any vertex to the principal axis line
+    d_par = (d @ axis)[:, None] * axis   # (N, 3) parallel component
+    d_perp = d - d_par                   # (N, 3) perpendicular component
+    return float(np.linalg.norm(d_perp, axis=1).max())
+
+
+def _capsule_radii_from_urdf(urdf_path: str, capsule_defs: list) -> list:
+    """Compute capsule radii from URDF collision geometry.
+
+    Priority per link:
+      1. Mesh collision geometry  → PCA-based bounding capsule radius (accurate)
+      2. Box collision geometry   → sqrt(d2²+d3²)/2 heuristic (d1=length axis)
+      3. No geometry found        → fall back to hardcoded default_r
+    Looks up the distal link (link_b) first, then proximal (link_a).
+    """
+    import os
+    import xml.etree.ElementTree as ET
+
+    urdf_dir = os.path.dirname(os.path.abspath(urdf_path))
+    tree = ET.parse(urdf_path)
+    root = tree.getroot()
+
+    link_radii: dict = {}   # link_name → (radius, source_label)
+    for link_el in root.findall("link"):
+        name = link_el.get("name")
+        max_r, src = 0.0, ""
+
+        # 1. collision geometry (mesh > box)
+        for col in link_el.findall("collision"):
+            geom = col.find("geometry")
+            if geom is None:
+                continue
+            mesh_el = geom.find("mesh")
+            if mesh_el is not None:
+                r = _mesh_bounding_capsule_radius(
+                    os.path.join(urdf_dir, mesh_el.get("filename")))
+                if r > max_r:
+                    max_r, src = r, "col_mesh"
+                continue
+            box_el = geom.find("box")
+            if box_el is not None:
+                dims = sorted([float(x) for x in box_el.get("size").split()], reverse=True)
+                r = np.sqrt(dims[1] ** 2 + dims[2] ** 2) / 2.0
+                if r > max_r:
+                    max_r, src = r, "box"
+
+        # visual meshes intentionally NOT used as fallback:
+        # they represent render geometry (with fillets, bolts, etc.)
+        # and their PCA axis doesn't align with the capsule axis without
+        # knowing the joint frame directions — gives incorrect radii
+
+        if max_r > 0.0:
+            link_radii[name] = (max_r, src)
+
+    radii = []
+    for link_a, link_b, default_r in capsule_defs:
+        r_a, src_a = link_radii.get(link_a, (None, None))
+        r_b, src_b = link_radii.get(link_b, (None, None))
+        if r_a is not None and r_b is not None:
+            # both links have geometry — take the max (bounding capsule covers both)
+            if r_a >= r_b:
+                r, label = r_a, f"{src_a}(proximal)"
+            else:
+                r, label = r_b, f"{src_b}(distal)"
+        elif r_b is not None:
+            r, label = r_b, f"{src_b}(distal)"
+        elif r_a is not None:
+            r, label = r_a, f"{src_a}(proximal)"
+        else:
+            r, label = default_r, "default"
+        radii.append(r)
+        print(f"  capsule {link_a}->{link_b}: r={r * 1000:.1f}mm ({label})")
+    return radii
+
+
 class VectorWristJointOptimizer(RetargetOptimizer):
     retargeting_type = "VECTOR_WRIST_JOINT"
 
@@ -1024,7 +1179,120 @@ class VectorWristJointOptimizer(RetargetOptimizer):
         self.opt.set_ftol_abs(params["opt_ftol_abs"])
         self.opt.set_maxtime(params["opt_maxtime"])
 
+        # capsule collision: 2 capsules per finger + 1 palm capsule
+        # finger order: 0-1=index, 2-3=middle, 4-5=ring, 6-7=thumb, 8=palm
+        # default radii are fallbacks; real radii are computed from URDF collision boxes
+        capsule_defs_raw = [
+            ("mcp_joint",       "fingertip",       0.012),  # index proximal (0)
+            ("fingertip",       "index_tip",       0.010),  # index distal  (1)
+            ("mcp_joint_2",     "fingertip_2",     0.012),  # middle proximal (2)
+            ("fingertip_2",     "middle_tip",      0.010),  # middle distal  (3)
+            ("mcp_joint_3",     "fingertip_3",     0.012),  # ring proximal  (4)
+            ("fingertip_3",     "ring_tip",        0.010),  # ring distal    (5)
+            ("thumb_pip",       "thumb_fingertip", 0.013),  # thumb proximal (6)
+            ("thumb_fingertip", "thumb_tip",       0.011),  # thumb distal   (7)
+            ("palm_lower",      "mcp_joint_2",     0.023),  # palm           (8)
+        ]
+        urdf_path = params.get("urdf_path")
+        if urdf_path:
+            print("[VectorWristJointOptimizer] computing capsule radii from URDF...")
+            radii = _capsule_radii_from_urdf(urdf_path, capsule_defs_raw)
+            capsule_defs = [(a, b, r) for (a, b, _), r in zip(capsule_defs_raw, radii)]
+        else:
+            capsule_defs = capsule_defs_raw
+        # add capsule frames not yet in computed_links_name
+        extra = ["mcp_joint", "mcp_joint_2", "mcp_joint_3", "thumb_pip"]
+        for f in extra:
+            if f not in self.computed_links_name:
+                self.computed_links_name.append(f)
+        # pre-compute indices and radii
+        self.capsule_idx = [
+            (self.computed_links_name.index(a), self.computed_links_name.index(b), r)
+            for a, b, r in capsule_defs
+        ]
+        # cross-finger pairs (different fingers, capsules 0-7)
+        finger_pairs = [(i, j) for i in range(8) for j in range(i + 1, 8) if i // 2 != j // 2]
+        # palm (8) vs thumb only — index/middle/ring MCP joints are ON the palm capsule,
+        # so their proximal capsules share an endpoint with palm and would be immediately infeasible
+        palm_pairs = [(6, 8), (7, 8)]
+        self.capsule_collision_pairs = finger_pairs + palm_pairs
+        # precompute index arrays and radii (numpy for fast constraint computation)
+        self.cap_ia = np.array([self.capsule_idx[ci][0] for ci, _ in self.capsule_collision_pairs])
+        self.cap_ib = np.array([self.capsule_idx[ci][1] for ci, _ in self.capsule_collision_pairs])
+        self.cap_ja = np.array([self.capsule_idx[cj][0] for _, cj in self.capsule_collision_pairs])
+        self.cap_jb = np.array([self.capsule_idx[cj][1] for _, cj in self.capsule_collision_pairs])
+        self.cap_radii_sum = np.array(
+            [self.capsule_idx[ci][2] + self.capsule_idx[cj][2]
+             for ci, cj in self.capsule_collision_pairs],
+            dtype=np.float64,
+        )
+        # torch version for objective soft penalty (unused, kept for reference)
+        self.cap_radii_sum_torch = torch.as_tensor(self.cap_radii_sum)
+        self.collision_weight = 0.0   # soft penalty disabled — using hard constraints
+        self.min_finger_dist  = 0.0
+
+        # add hard inequality constraints: dist(capsule_i, capsule_j) >= r1+r2
+        self._add_capsule_constraints()
+
+    def _add_capsule_constraints(self):
+        """Register capsule collision as hard NLopt inequality constraints.
+        NLopt form: g(x) <= 0, so g_k = (r1+r2) - dist_k <= 0.
+        Gradients are computed analytically in numpy — no PyTorch backward passes.
+        """
+        n_c = len(self.capsule_collision_pairs)
+        tol = np.full(n_c, 1e-3)  # 1mm tolerance
+
+        _qpos_doa = np.zeros(self.robot_adaptor.doa)
+        _qpos_dof = np.zeros(self.robot_model.dof)
+
+        def constraint_fn(result: np.ndarray, x: np.ndarray, grad: np.ndarray):
+            _qpos_doa[:] = x
+            _qpos_dof[:] = self.robot_adaptor.forward_qpos(_qpos_doa)
+            self.robot_model.compute_forward_kinematics(_qpos_dof)
+
+            links_pos = np.stack(
+                [self.robot_model.get_frame_pose(name)[:3, 3]
+                 for name in self.computed_links_name]
+            )  # (n_links, 3)
+
+            dists, ga0, ga1, gb0, gb1 = _seg_seg_dist_and_grad_np(
+                links_pos[self.cap_ia],
+                links_pos[self.cap_ib],
+                links_pos[self.cap_ja],
+                links_pos[self.cap_jb],
+            )  # each (n_c,) or (n_c, 3)
+
+            result[:] = self.cap_radii_sum - dists
+
+            if grad.size > 0:
+                self.robot_model.compute_jacobians(_qpos_dof)
+                links_jaco = self.robot_adaptor.backward_jacobian(
+                    np.stack([self.robot_model.get_frame_space_jacobian(name)
+                              for name in self.computed_links_name])
+                )[:, :3, :]  # (n_links, 3, n_doa)
+
+                # d(g_k)/d(qpos) = -d(dist_k)/d(qpos)
+                # = -(ga0[k] @ J[ia_k] + ga1[k] @ J[ib_k]
+                #      + gb0[k] @ J[ja_k] + gb1[k] @ J[jb_k])
+                # ga0 shape: (n_c, 3); links_jaco[cap_ia] shape: (n_c, 3, n_doa)
+                # (n_c, 1, 3) @ (n_c, 3, n_doa) → (n_c, 1, n_doa) → (n_c, n_doa)
+                grad[:] = -(
+                    np.matmul(ga0[:, None, :], links_jaco[self.cap_ia]).squeeze(1)
+                    + np.matmul(ga1[:, None, :], links_jaco[self.cap_ib]).squeeze(1)
+                    + np.matmul(gb0[:, None, :], links_jaco[self.cap_ja]).squeeze(1)
+                    + np.matmul(gb1[:, None, :], links_jaco[self.cap_jb]).squeeze(1)
+                )
+
+        self.opt.add_inequality_mconstraint(constraint_fn, tol)
+
     def get_objective_function(self, ref_values: Dict[str, np.ndarray]):
+        # update dynamic params if provided
+        if "params" in ref_values:
+            p = ref_values["params"]
+            self.opt.set_maxtime(p["opt_maxtime"])
+            self.opt.set_ftol_abs(p["opt_ftol_abs"])
+            self.huber_loss = torch.nn.SmoothL1Loss(beta=p["huber_delta"])
+
         # extract reference (target) values
         ref_links_vec = ref_values["links_vec"]
         ref_wrist_quat = ref_values["wrist_quat"]  # (w, x, y, z)
@@ -1092,7 +1360,7 @@ class VectorWristJointOptimizer(RetargetOptimizer):
             joint_pos_cost = self.huber_loss(weight_joint_pos * qpos_doa_err, torch.zeros_like(qpos_doa_err))
             joint_vel_cost = self.huber_loss(weight_joint_vel * qvel_doa_torch, torch.zeros_like(qvel_doa_torch))
 
-            # total cost
+            # total cost (collision handled by hard constraints in NLopt)
             total_cost = links_vec_cost + wrist_rot_cost + joint_pos_cost + joint_vel_cost
 
             # ---------------------- gradients ----------------------

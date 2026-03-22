@@ -59,7 +59,16 @@ class HandRetargeter:
             urdf_path:   path to leap_hand_right.urdf
             hand_scale:  scale human hand keypoints to match robot size (mingrui default: 1.5)
         """
-        self.hand_scale = hand_scale
+        self.hand_scale    = hand_scale
+        self.pinch_thres_1 = 0.1
+        self.pinch_thres_2 = 0.01
+        self.wrist_weight  = 1.0
+        self.pinch_weight  = 10.0
+        self.orient_weight = 10.0
+        self.wjpos         = WEIGHTS_JOINT_POS.copy()  # shape (16,), only [0,4,8,12] used
+        self.opt_maxtime  = 0.05
+        self.opt_ftol_abs = 1e-5
+        self.huber_delta  = 0.02
 
         robot_model = RobotPinocchio(robot_file_path=urdf_path)
         actuated_joints_name = [str(i) for i in range(16)]
@@ -74,7 +83,7 @@ class HandRetargeter:
             "task_links_name":   [pair[1] for pair in TARGET_LINK_PAIRS],
             "wrist_link_name":   WRIST_LINK_NAME,
         }
-        params = {"huber_delta": 0.02, "opt_ftol_abs": 1e-5, "opt_maxtime": 0.05}
+        params = {"huber_delta": self.huber_delta, "opt_ftol_abs": self.opt_ftol_abs, "opt_maxtime": self.opt_maxtime, "urdf_path": urdf_path}
 
         self.optimizer = VectorWristJointOptimizer(
             robot_adaptor=self.robot_adaptor,
@@ -106,8 +115,8 @@ class HandRetargeter:
         thumb_primary_dist = np.linalg.norm(
             hand_kps[MANO_FINGERTIP_INDEX[1:4]] - thumb_tip.reshape(1, 3), axis=1
         )
-        pinch_thres_1 = 0.1   # transition threshold
-        pinch_thres_2 = 0.01  # contact threshold
+        pinch_thres_1 = self.pinch_thres_1
+        pinch_thres_2 = self.pinch_thres_2
 
         sigmoid_weights_thumb_primary = sigmoid(thumb_primary_dist, c=pinch_thres_1, w=10)
         sigmoid_weights_wrist_fingertips = sigmoid(
@@ -120,7 +129,7 @@ class HandRetargeter:
 
         # -------- wrist -> fingertip vectors [0:4] --------
         ref_link_vec[0:4, :] = hand_kps[MANO_FINGERTIP_INDEX[:4]] - wrist_pos
-        weights_links_vec[0:4] = 1.0 * sigmoid_weights_wrist_fingertips
+        weights_links_vec[0:4] = self.wrist_weight * sigmoid_weights_wrist_fingertips
 
         # -------- thumb -> primary vectors (pinch) [4:7] --------
         # rescale distance: [pinch_thres_2, pinch_thres_1] -> [0, pinch_thres_1]
@@ -132,12 +141,12 @@ class HandRetargeter:
         rescaled_rel_dist[rel_dist > pinch_thres_1] = rel_dist[rel_dist > pinch_thres_1]
         rescaled_rel_pos = normalize(rel_pos) * rescaled_rel_dist.reshape(-1, 1)
         ref_link_vec[4:7, :] = rescaled_rel_pos
-        weights_links_vec[4:7] = 10.0 * sigmoid_weights_thumb_primary
+        weights_links_vec[4:7] = self.pinch_weight * sigmoid_weights_thumb_primary
 
         # -------- fingertip orientation vectors [7:11] --------
         mano_idx = np.asarray(MANO_FINGERTIP_INDEX[:4])
         ref_link_vec[7:11, :] = hand_kps[mano_idx] - hand_kps[mano_idx - 1]
-        weights_links_vec[7:11] = 10.0
+        weights_links_vec[7:11] = self.orient_weight
 
         # -------- build ref_values (same structure as mingrui) --------
         ref_values = {
@@ -148,8 +157,13 @@ class HandRetargeter:
             "weights": {
                 "links_vec":  weights_links_vec,
                 "wrist_rot":  0.0,          # hand fixed, no arm rotation term
-                "joint_pos":  WEIGHTS_JOINT_POS.copy(),
+                "joint_pos":  self.wjpos.copy(),
                 "joint_vel":  np.full(16, 1e-2),
+            },
+            "params": {
+                "huber_delta":   self.huber_delta,
+                "opt_ftol_abs":  self.opt_ftol_abs,
+                "opt_maxtime":   self.opt_maxtime,
             },
         }
 

@@ -74,7 +74,7 @@ class SingleHandDetector:
         results = self.hand_detector.detect_for_video(mp_image, timestamp_ms)
 
         if not results.hand_landmarks:
-            return 0, None, None, None
+            return 0, None, None, None, None
 
         desired_hand_num = -1
         for i, handedness in enumerate(results.handedness):
@@ -83,7 +83,7 @@ class SingleHandDetector:
                 desired_hand_num = i
                 break
         if desired_hand_num < 0:
-            return 0, None, None, None
+            return 0, None, None, None, None
 
         keypoint_3d = results.hand_world_landmarks[desired_hand_num]
         keypoint_2d = results.hand_landmarks[desired_hand_num]
@@ -106,7 +106,10 @@ class SingleHandDetector:
         else:
             wrist_pose_in_cam = None
 
-        return num_box, joint_pos, keypoint_2d, wrist_pose_in_cam
+        # wrist rotation matrix (3x3) in camera frame — always available
+        wrist_rot_matrix = mediapipe_wrist_rot @ self.operator2mano
+
+        return num_box, joint_pos, keypoint_2d, wrist_pose_in_cam, wrist_rot_matrix
 
     @staticmethod
     def parse_keypoint_3d(keypoint_3d) -> np.ndarray:
