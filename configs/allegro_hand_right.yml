@@ -1,0 +1,63 @@
+retargeting:
+  type: vector
+  urdf_path: assets/allegro_hand/allegro_hand_right.urdf
+  wrist_link: wrist
+  scaling_factor: 1.6
+
+  # joint names as they appear in the URDF (revolute joints only, in order)
+  actuated_joints_name:
+    ["joint_0.0", "joint_1.0", "joint_2.0", "joint_3.0",
+     "joint_4.0", "joint_5.0", "joint_6.0", "joint_7.0",
+     "joint_8.0", "joint_9.0", "joint_10.0", "joint_11.0",
+     "joint_12.0", "joint_13.0", "joint_14.0", "joint_15.0"]
+
+  # per-joint position regularization weight (ABD joint = first in each group)
+  # index(0-3), middle(4-7), ring(8-11), thumb(12-15)
+  weights_joint_pos: [5.0, 0.0, 0.0, 0.0,  5.0, 0.0, 0.0, 0.0,  5.0, 0.0, 0.0, 0.0,  0.5, 0.0, 0.0, 0.0]
+
+  # wrist -> fingertip vectors (4 pairs, dex-retargeting compatible)
+  # order: thumb, index, middle, ring (matches MANO_FINGERTIP_INDEX[:4])
+  target_origin_link_names: [wrist, wrist, wrist, wrist]
+  target_task_link_names:   [link_15.0_tip, link_3.0_tip, link_7.0_tip, link_11.0_tip]
+
+  # pinch: thumb_tip -> other fingertips (3 pairs, mingrui extension)
+  pinch_origin_link_names: [link_15.0_tip, link_15.0_tip, link_15.0_tip]
+  pinch_task_link_names:   [link_3.0_tip,  link_7.0_tip,  link_11.0_tip]
+
+  # orient: penultimate -> tip (4 pairs, mingrui extension)
+  # penultimate link = DIP joint link (one before tip)
+  orient_link_pairs:
+    - [link_14.0, link_15.0_tip]  # thumb: DIP -> tip
+    - [link_2.0,  link_3.0_tip]   # index: DIP -> tip
+    - [link_6.0,  link_7.0_tip]   # middle: DIP -> tip
+    - [link_10.0, link_11.0_tip]  # ring: DIP -> tip
+
+  # capsule collision avoidance (9 capsules: 2 per finger + 1 palm)
+  # finger order: 0-1=index, 2-3=middle, 4-5=ring, 6-7=thumb, 8=palm
+  capsule_defs:
+    - [link_0.0,  link_2.0,       0.012]  # index proximal  (0)
+    - [link_2.0,  link_3.0_tip,   0.010]  # index distal    (1)
+    - [link_4.0,  link_6.0,       0.012]  # middle proximal (2)
+    - [link_6.0,  link_7.0_tip,   0.010]  # middle distal   (3)
+    - [link_8.0,  link_10.0,      0.012]  # ring proximal   (4)
+    - [link_10.0, link_11.0_tip,  0.010]  # ring distal     (5)
+    - [link_12.0, link_14.0,      0.013]  # thumb proximal  (6)
+    - [link_14.0, link_15.0_tip,  0.011]  # thumb distal    (7)
+    - [wrist,     link_4.0,       0.013]  # palm            (8)
+
+  # thumb (6,7) vs all other fingers (0-5) + palm (8) vs thumb (6,7)
+  capsule_collision_pairs:
+    - [6, 0]
+    - [6, 1]
+    - [6, 2]
+    - [6, 3]
+    - [6, 4]
+    - [6, 5]
+    - [7, 0]
+    - [7, 1]
+    - [7, 2]
+    - [7, 3]
+    - [7, 4]
+    - [7, 5]
+    - [6, 8]
+    - [7, 8]

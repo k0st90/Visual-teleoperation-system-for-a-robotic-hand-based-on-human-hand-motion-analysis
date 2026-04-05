@@ -1,3 +1,6 @@
+import argparse
+import queue
+import threading
 import time
 import cv2
 import numpy as np
@@ -5,22 +8,26 @@ import pybullet as pb
 import pybullet_data
 from scipy.spatial.transform import Rotation as sciR
 
-from hand_detector import SingleHandDetector
 from hand_retargeter import HandRetargeter
 
-URDF_PATH = "assets/leap_hand/leap_hand_right.urdf"
+HAND_CONFIGS = {
+    "leap":    ("assets/leap_hand/leap_hand_right.urdf",    "configs/leap_hand_right.yml"),
+    "allegro": ("assets/allegro_hand/allegro_hand_right.urdf", "configs/allegro_hand_right.yml"),
+    "shadow":  ("assets/shadow_hand/shadow_hand_right.urdf",   "configs/shadow_hand_right.yml"),
+}
+
 HAND_BASE_POS = [0, 0, 0.1]
 HAND_BASE_ORI = pb.getQuaternionFromEuler([0, 0, 0])
 
 
-def setup_pybullet():
+def setup_pybullet(urdf_path):
     pb.connect(pb.GUI)
     pb.setAdditionalSearchPath(pybullet_data.getDataPath())
     pb.setGravity(0, 0, -9.81)
     pb.loadURDF("plane.urdf")
 
     hand_id = pb.loadURDF(
-        URDF_PATH,
+        urdf_path,
         basePosition=HAND_BASE_POS,
         baseOrientation=HAND_BASE_ORI,
         useFixedBase=True,
@@ -71,14 +78,15 @@ def apply_defaults(retargeter):
     retargeter.huber_delta   = DEFAULT_PARAMS["huber_delta"]
 
 
-def reinit_pybullet(retargeter):
+def reinit_pybullet(retargeter, urdf_path):
     """Disconnect and reconnect PyBullet, reload URDF, recreate sliders with default values."""
     apply_defaults(retargeter)
     pb.disconnect()
-    hand_id = setup_pybullet()
-    joint_indices = get_joint_indices(hand_id)
+    hand_id = setup_pybullet(urdf_path)
+    joint_indices, pb_names = get_joint_indices(hand_id)
+    joint_indices, mapping = build_joint_mapping(retargeter.actuated_joints_name, pb_names, joint_indices)
     sliders = setup_sliders(retargeter)
-    return hand_id, joint_indices, sliders
+    return hand_id, joint_indices, mapping, sliders
 
 
 def setup_sliders(retargeter):
@@ -123,38 +131,84 @@ def read_sliders(sliders, retargeter, last_reset):
 
 
 def get_joint_indices(hand_id):
-    """Return list of actuated joint indices in pybullet (matching joint names '0'..'15')."""
+    """Return (joint_indices, joint_names) for revolute joints in PyBullet URDF order."""
     joint_indices = []
+    joint_names = []
     for i in range(pb.getNumJoints(hand_id)):
         info = pb.getJointInfo(hand_id, i)
-        joint_type = info[2]
-        joint_name = info[1].decode("utf-8")
-        if joint_type == pb.JOINT_REVOLUTE:
+        if info[2] == pb.JOINT_REVOLUTE:
             joint_indices.append(i)
-    return joint_indices
+            joint_names.append(info[1].decode("utf-8"))
+    return joint_indices, joint_names
 
 
-# Optimizer output (by joint name '0'-'15'): index(0-3), middle(4-7), ring(8-11), thumb(12-15)
-# PyBullet revolute order within each finger: ABD, MCP, PIP, DIP = joints ['1','0','2','3'], ['5','4',...], ['9','8',...], ['12','13',...]
-# → only need to swap ABD/MCP within each 3-finger group
-PINOCCHIO_TO_PYBULLET = [1, 0, 2, 3, 5, 4, 6, 7, 9, 8, 10, 11, 12, 13, 14, 15]
+def build_joint_mapping(pino_names, pb_names, all_joint_indices):
+    """Returns (actuated_joint_indices, mapping) where mapping permutes optimizer
+    output to match PyBullet joint order. Touch joints (e.g. WRJ1/WRJ2) are
+    excluded — they stay at their default PyBullet position (0).
+    """
+    pino_pos = {name: i for i, name in enumerate(pino_names)}
+    actuated_indices = []
+    mapping = []
+    for idx, name in zip(all_joint_indices, pb_names):
+        if name in pino_pos:
+            actuated_indices.append(idx)
+            mapping.append(pino_pos[name])
+    return actuated_indices, np.array(mapping, dtype=np.int32)
 
 
-def apply_qpos(hand_id, joint_indices, qpos):
-    qpos_pb = qpos[PINOCCHIO_TO_PYBULLET]
+def apply_qpos(hand_id, joint_indices, qpos, mapping):
+    qpos_pb = qpos[mapping]
     for i, joint_idx in enumerate(joint_indices):
         pb.resetJointState(hand_id, joint_idx, qpos_pb[i])
 
 
+def detection_loop(detector, cap, cam_K, det_queue, stop_event):
+    """Runs in a separate thread: captures frames and runs hand detection.
+    Puts (bgr, hand_kps, keypoint_2d, wrist_pose_in_cam, wrist_rot) into det_queue.
+    Queue size=1: old results are dropped so main thread always gets the latest frame.
+    """
+    while not stop_event.is_set():
+        ret, bgr = cap.read()
+        if not ret:
+            continue
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        num_box, hand_kps, keypoint_2d, wrist_pose_in_cam, wrist_rot = detector.detect(rgb, cam_K)
+        result = (bgr, hand_kps, keypoint_2d, wrist_pose_in_cam, wrist_rot)
+        # Drop stale result if main thread hasn't consumed it yet
+        try:
+            det_queue.get_nowait()
+        except queue.Empty:
+            pass
+        det_queue.put(result)
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--detector", choices=["wilor", "mediapipe"], default="wilor",
+                        help="Hand detector backend (default: wilor)")
+    parser.add_argument("--hand", choices=list(HAND_CONFIGS.keys()), default="leap",
+                        help="Robot hand to use (default: leap)")
+    args = parser.parse_args()
+
+    urdf_path, yml_path = HAND_CONFIGS[args.hand]
+    print(f"Hand: {args.hand}  |  URDF: {urdf_path}  |  Config: {yml_path}")
+
     # -------- setup PyBullet --------
-    hand_id = setup_pybullet()
-    joint_indices = get_joint_indices(hand_id)
-    print(f"PyBullet: {len(joint_indices)} actuated joints")
+    hand_id = setup_pybullet(urdf_path)
 
     # -------- setup detector + retargeter --------
-    detector = SingleHandDetector(hand_type="Right")
-    retargeter = HandRetargeter(urdf_path=URDF_PATH)
+    if args.detector == "wilor":
+        from wilor_detector import WilorDetector
+        detector = WilorDetector(hand_type="Right")
+    else:
+        from hand_detector import SingleHandDetector
+        detector = SingleHandDetector(hand_type="Right")
+    retargeter = HandRetargeter(yml_path=yml_path)
+
+    joint_indices, pb_names = get_joint_indices(hand_id)
+    joint_indices, mapping = build_joint_mapping(retargeter.actuated_joints_name, pb_names, joint_indices)
+    print(f"PyBullet: {len(joint_indices)} actuated joints")
     sliders = setup_sliders(retargeter)
 
     # -------- setup camera --------
@@ -162,7 +216,6 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    # Estimated intrinsics for a typical 60° FOV webcam at 640x480
     fx = 554.0
     cam_K = np.array([[fx, 0, 320.0], [0, fx, 240.0], [0, 0, 1.0]])
 
@@ -170,62 +223,67 @@ def main():
         print("Cannot open camera")
         return
 
+    # -------- start detector thread --------
+    det_queue = queue.Queue(maxsize=1)
+    stop_event = threading.Event()
+    det_thread = threading.Thread(target=detection_loop,
+                                  args=(detector, cap, cam_K, det_queue, stop_event),
+                                  daemon=True)
+    det_thread.start()
     print("Running. Press Q to quit, R to recalibrate wrist reference.")
+
     frame_idx = 0
     t_prev = time.time()
     last_reset = int(pb.readUserDebugParameter(sliders["reset"]))
-    wrist_rot_ref = None   # set on first detection; relative rotations from this neutral pose
-    wrist_quat_smooth = np.array([0.0, 0.0, 0.0, 1.0])  # smoothed quaternion (xyzw), start = identity
-    WRIST_EMA = 0.15       # fraction of new value per frame; lower = smoother but more lag
+    wrist_rot_ref = None
+    wrist_quat_smooth = np.array([0.0, 0.0, 0.0, 1.0])
+    WRIST_EMA = 0.15
+    last_result = None  # last valid detection result (reused when queue is empty)
 
     while True:
-        ret, bgr = cap.read()
-        if not ret:
-            continue
-
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        num_box, hand_kps, keypoint_2d, wrist_pose_in_cam, wrist_rot = detector.detect(rgb, cam_K)
+        # Get latest detection — non-blocking, reuse last if nothing new yet
+        try:
+            last_result = det_queue.get_nowait()
+        except queue.Empty:
+            pass
 
         current_reset = read_sliders(sliders, retargeter, last_reset)
         if current_reset != last_reset:
-            hand_id, joint_indices, sliders = reinit_pybullet(retargeter)
+            hand_id, joint_indices, mapping, sliders = reinit_pybullet(retargeter, urdf_path)
             last_reset = int(pb.readUserDebugParameter(sliders["reset"]))
-            wrist_rot_ref = None  # recalibrate on next detection
+            wrist_rot_ref = None
             wrist_quat_smooth = np.array([0.0, 0.0, 0.0, 1.0])
+            last_result = None
 
-        if hand_kps is not None:
-            # Use PnP rotation (more accurate than SVD approx) if available.
-            using_pnp = wrist_pose_in_cam is not None
-            R_cur = wrist_pose_in_cam[:3, :3] if using_pnp else wrist_rot
-            if frame_idx % 60 == 0:
-                print(f"  wrist rot source: {'PnP' if using_pnp else 'SVD fallback'}")
-            # On first detection, store reference orientation (= PyBullet identity).
-            if wrist_rot_ref is None:
-                wrist_rot_ref = R_cur.copy()
-                print("Wrist reference set.")
-            # Relative rotation expressed in the neutral MANO/PyBullet world frame:
-            # R_rel = R_ref.T @ R_cur  (identity at calibration, correct axis directions)
-            R_rel = wrist_rot_ref.T @ R_cur
-            q_new = sciR.from_matrix(R_rel).as_quat()  # (x,y,z,w)
-            # EMA smoothing on quaternion; fix sign to avoid q / -q flipping
-            if np.dot(q_new, wrist_quat_smooth) < 0:
-                q_new = -q_new
-            wrist_quat_smooth = WRIST_EMA * q_new + (1.0 - WRIST_EMA) * wrist_quat_smooth
-            wrist_quat_smooth /= np.linalg.norm(wrist_quat_smooth)
-            pb.resetBasePositionAndOrientation(hand_id, HAND_BASE_POS, wrist_quat_smooth)
+        if last_result is not None:
+            bgr, hand_kps, keypoint_2d, wrist_pose_in_cam, wrist_rot = last_result
 
-            qpos = retargeter.retarget(hand_kps)
-            apply_qpos(hand_id, joint_indices, qpos)
-            if frame_idx % 30 == 0:
-                pin_names = ['1','0','2','3','12','13','14','15','5','4','6','7','9','8','10','11']
-                for i, (n, v) in enumerate(zip(pin_names, qpos)):
-                    print(f"  pin[{i:2d}] joint'{n}' = {v:+.3f}")
-            annotated = detector.draw_skeleton_on_image(bgr, keypoint_2d)
-            rot_label = "rot: PnP" if using_pnp else "rot: SVD"
-            cv2.putText(annotated, rot_label, (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+            if hand_kps is not None:
+                using_pnp = wrist_pose_in_cam is not None
+                R_cur = wrist_pose_in_cam[:3, :3] if using_pnp else wrist_rot
+                if frame_idx % 60 == 0:
+                    print(f"  wrist rot source: {'PnP' if using_pnp else 'SVD fallback'}")
+                if wrist_rot_ref is None:
+                    wrist_rot_ref = R_cur.copy()
+                    print("Wrist reference set.")
+                R_rel = wrist_rot_ref.T @ R_cur
+                q_new = sciR.from_matrix(R_rel).as_quat()
+                if np.dot(q_new, wrist_quat_smooth) < 0:
+                    q_new = -q_new
+                wrist_quat_smooth = WRIST_EMA * q_new + (1.0 - WRIST_EMA) * wrist_quat_smooth
+                wrist_quat_smooth /= np.linalg.norm(wrist_quat_smooth)
+                pb.resetBasePositionAndOrientation(hand_id, HAND_BASE_POS, wrist_quat_smooth)
+
+                qpos = retargeter.retarget(hand_kps)
+                apply_qpos(hand_id, joint_indices, qpos, mapping)
+                annotated = detector.draw_skeleton_on_image(bgr, keypoint_2d)
+                rot_label = "rot: PnP" if using_pnp else "rot: SVD"
+                cv2.putText(annotated, rot_label, (10, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+            else:
+                annotated = bgr
         else:
-            annotated = bgr
+            annotated = np.zeros((480, 640, 3), dtype=np.uint8)
 
         t_now = time.time()
         fps = 1.0 / max(t_now - t_prev, 1e-6)
@@ -245,6 +303,8 @@ def main():
             wrist_quat_smooth = np.array([0.0, 0.0, 0.0, 1.0])
             print("Wrist reference cleared — will recalibrate on next detection.")
 
+    stop_event.set()
+    det_thread.join(timeout=2.0)
     cap.release()
     cv2.destroyAllWindows()
     pb.disconnect()
