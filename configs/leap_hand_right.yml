@@ -1,5 +1,4 @@
 retargeting:
-  type: vector
   urdf_path: assets/leap_hand/leap_hand_right.urdf
   wrist_link: palm_lower
   scaling_factor: 1.5
@@ -11,49 +10,11 @@ retargeting:
   # index(0-3), middle(4-7), ring(8-11), thumb(12-15)
   weights_joint_pos: [5.0, 0.0, 0.0, 0.0,  5.0, 0.0, 0.0, 0.0,  5.0, 0.0, 0.0, 0.0,  0.5, 0.0, 0.0, 0.0]
 
-  # wrist -> fingertip vectors (4 pairs, dex-retargeting compatible)
+  # wrist -> fingertip vectors (4 pairs)
   target_origin_link_names: [palm_lower, palm_lower, palm_lower, palm_lower]
   target_task_link_names:   [thumb_tip,  index_tip,  middle_tip, ring_tip]
 
-  # pinch: thumb_tip -> other fingertips (3 pairs, mingrui extension)
+  # pinch: thumb_tip -> other fingertips (3 pairs)
   pinch_origin_link_names: [thumb_tip, thumb_tip, thumb_tip]
   pinch_task_link_names:   [index_tip, middle_tip, ring_tip]
 
-  # orient: penultimate -> tip (4 pairs, mingrui extension)
-  orient_link_pairs:
-    - [thumb_fingertip, thumb_tip]
-    - [fingertip,       index_tip]
-    - [fingertip_2,     middle_tip]
-    - [fingertip_3,     ring_tip]
-
-  # capsule collision avoidance (9 capsules: 2 per finger + 1 palm)
-  # finger order: 0-1=index, 2-3=middle, 4-5=ring, 6-7=thumb, 8=palm
-  # third value is default radius fallback (overridden by URDF auto-calc)
-  capsule_defs:
-    - [mcp_joint,       fingertip,       0.012]  # index proximal  (0)
-    - [fingertip,       index_tip,       0.010]  # index distal    (1)
-    - [mcp_joint_2,     fingertip_2,     0.012]  # middle proximal (2)
-    - [fingertip_2,     middle_tip,      0.010]  # middle distal   (3)
-    - [mcp_joint_3,     fingertip_3,     0.012]  # ring proximal   (4)
-    - [fingertip_3,     ring_tip,        0.010]  # ring distal     (5)
-    - [thumb_pip,       thumb_fingertip, 0.013]  # thumb proximal  (6)
-    - [thumb_fingertip, thumb_tip,       0.011]  # thumb distal    (7)
-    - [palm_lower,      mcp_joint_2,     0.023]  # palm            (8)
-
-  # which capsule pairs to check for collision
-  # thumb (6,7) vs all other fingers (0-5) + palm (8) vs thumb (6,7)
-  capsule_collision_pairs:
-    - [6, 0]
-    - [6, 1]
-    - [6, 2]
-    - [6, 3]
-    - [6, 4]
-    - [6, 5]
-    - [7, 0]
-    - [7, 1]
-    - [7, 2]
-    - [7, 3]
-    - [7, 4]
-    - [7, 5]
-    - [6, 8]
-    - [7, 8]

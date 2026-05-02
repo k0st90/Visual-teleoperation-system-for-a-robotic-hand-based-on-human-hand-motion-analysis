@@ -40,31 +40,6 @@ def _seg_seg_dist_and_grad_np(a0, a1, b0, b1, eps=1e-8):
     )
 
 
-def _seg_seg_dist_batch(a0: torch.Tensor, a1: torch.Tensor,
-                        b0: torch.Tensor, b1: torch.Tensor,
-                        eps: float = 1e-8) -> torch.Tensor:
-    """Batched differentiable minimum distance between N pairs of 3D line segments.
-    Args:
-        a0, a1, b0, b1: shape (N, 3)
-    Returns:
-        distances shape (N,) — differentiable w.r.t. all inputs
-    """
-    da = a1 - a0          # (N, 3)
-    db = b1 - b0
-    dc = b0 - a0
-    aa = (da * da).sum(-1)  # (N,)
-    bb = (db * db).sum(-1)
-    ab = (da * db).sum(-1)
-    ac = (da * dc).sum(-1)
-    bc = (db * dc).sum(-1)
-    denom = aa * bb - ab * ab
-    s = torch.clamp((ac * bb - ab * bc) / (denom + eps), 0.0, 1.0)
-    t = torch.clamp((ac * ab - aa * bc) / (denom + eps), 0.0, 1.0)
-    closest_a = a0 + s.unsqueeze(-1) * da   # (N, 3)
-    closest_b = b0 + t.unsqueeze(-1) * db
-    return torch.norm(closest_a - closest_b + eps, dim=-1)  # (N,)
-
-
 class RetargetOptimizer:
     retargeting_type = "BASE"
 

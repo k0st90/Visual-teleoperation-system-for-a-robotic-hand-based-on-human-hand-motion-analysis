@@ -1,5 +1,4 @@
 retargeting:
-  type: vector
   urdf_path: assets/shadow_hand/shadow_hand_right.urdf
   wrist_link: palm
   scaling_factor: 1.0
@@ -7,7 +6,7 @@ retargeting:
   # wrist joints fixed at 0 — orientation handled by resetBasePositionAndOrientation in main.py
   touch_joints_name: ["WRJ1", "WRJ2"]
 
-  # 22 finger joints (wrist joints WRJ1/WRJ2 excluded — wrist orientation handled by main.py)
+  # 22 finger joints (wrist joints WRJ1/WRJ2 excluded)
   # order: index(FF), middle(MF), ring(RF), little(LF), thumb(TH)
   actuated_joints_name:
     ["FFJ4", "FFJ3", "FFJ2", "FFJ1",
@@ -20,55 +19,11 @@ retargeting:
   # FF(0-3), MF(4-7), RF(8-11), LF(12-16, 5 joints), TH(17-21, 5 joints)
   weights_joint_pos: [5.0, 0.0, 0.0, 0.0,  5.0, 0.0, 0.0, 0.0,  5.0, 0.0, 0.0, 0.0,  5.0, 0.0, 0.0, 0.0, 0.0,  0.5, 0.0, 0.0, 0.0, 0.0]
 
-  # wrist -> fingertip vectors (5 pairs, dex-retargeting compatible)
+  # wrist -> fingertip vectors (5 pairs)
   # order: thumb, index, middle, ring, little (matches MANO_FINGERTIP_INDEX[:5])
   target_origin_link_names: [palm, palm, palm, palm, palm]
   target_task_link_names:   [thtip, fftip, mftip, rftip, lftip]
 
-  # pinch: thumb_tip -> other fingertips (4 pairs, mingrui extension)
+  # pinch: thumb_tip -> other fingertips (4 pairs)
   pinch_origin_link_names: [thtip, thtip, thtip, thtip]
   pinch_task_link_names:   [fftip, mftip, rftip, lftip]
-
-  # orient: penultimate -> tip (5 pairs, mingrui extension)
-  orient_link_pairs:
-    - [thdistal,  thtip]   # thumb: distal -> tip
-    - [ffdistal,  fftip]   # index: distal -> tip
-    - [mfdistal,  mftip]   # middle: distal -> tip
-    - [rfdistal,  rftip]   # ring: distal -> tip
-    - [lfdistal,  lftip]   # little: distal -> tip
-
-  # capsule collision avoidance (11 capsules: 2 per finger * 5 fingers + 1 palm)
-  # finger order: 0-1=index, 2-3=middle, 4-5=ring, 6-7=little, 8-9=thumb, 10=palm
-  capsule_defs:
-    - [ffproximal, ffdistal,  0.012]  # index proximal  (0)
-    - [ffdistal,   fftip,     0.010]  # index distal    (1)
-    - [mfproximal, mfdistal,  0.012]  # middle proximal (2)
-    - [mfdistal,   mftip,     0.010]  # middle distal   (3)
-    - [rfproximal, rfdistal,  0.012]  # ring proximal   (4)
-    - [rfdistal,   rftip,     0.010]  # ring distal     (5)
-    - [lfproximal, lfdistal,  0.012]  # little proximal (6)
-    - [lfdistal,   lftip,     0.010]  # little distal   (7)
-    - [thproximal, thmiddle,  0.013]  # thumb proximal  (8)
-    - [thmiddle,   thtip,     0.011]  # thumb distal    (9)
-    - [palm,       mfknuckle, 0.023]  # palm            (10)
-
-  # thumb (8,9) vs all other fingers (0-7) + palm (10) vs thumb (8,9)
-  capsule_collision_pairs:
-    - [8, 0]
-    - [8, 1]
-    - [8, 2]
-    - [8, 3]
-    - [8, 4]
-    - [8, 5]
-    - [8, 6]
-    - [8, 7]
-    - [9, 0]
-    - [9, 1]
-    - [9, 2]
-    - [9, 3]
-    - [9, 4]
-    - [9, 5]
-    - [9, 6]
-    - [9, 7]
-    - [8, 10]
-    - [9, 10]

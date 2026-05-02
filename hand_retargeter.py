@@ -68,8 +68,6 @@ class HandRetargeter:
             link_pairs           = cfg["target_link_pairs"]
             wrist_link           = cfg["wrist_link"]
             hand_scale           = cfg["scaling_factor"]
-            capsule_defs         = cfg["capsule_defs"]
-            capsule_pairs        = cfg["capsule_collision_pairs"]
             n_fingers            = cfg["n_fingers"]
             actuated_joints_name = cfg["actuated_joints_name"] or [str(i) for i in range(16)]
             touch_joints_name    = cfg["touch_joints_name"]
@@ -79,8 +77,6 @@ class HandRetargeter:
         else:
             link_pairs           = TARGET_LINK_PAIRS
             wrist_link           = WRIST_LINK_NAME
-            capsule_defs         = None
-            capsule_pairs        = None
             n_fingers            = 4  # LEAP Hand default
             actuated_joints_name = [str(i) for i in range(16)]
             touch_joints_name    = []
@@ -109,9 +105,6 @@ class HandRetargeter:
             "task_links_name":   [pair[1] for pair in link_pairs],
             "wrist_link_name":   wrist_link,
         }
-        if capsule_defs is not None:
-            targets["capsule_defs"]            = capsule_defs
-            targets["capsule_collision_pairs"] = capsule_pairs
         params = {"huber_delta": self.huber_delta, "opt_ftol_abs": self.opt_ftol_abs, "opt_maxtime": self.opt_maxtime}
 
         self.optimizer = VectorWristJointOptimizer(

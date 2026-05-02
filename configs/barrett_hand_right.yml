@@ -1,0 +1,24 @@
+retargeting:
+  urdf_path: assets/barrett_hand/bhand_model.urdf
+  wrist_link: base_link
+  scaling_factor: 1.5
+
+  # finger_3 locked (opposition finger — maps poorly to human thumb)
+  touch_joints_name: ["finger_3_med_joint", "finger_3_dist_joint"]
+
+  # 6 DOF: finger_1 and finger_2 only
+  actuated_joints_name: [
+    "finger_1_prox_joint", "finger_1_med_joint", "finger_1_dist_joint",
+    "finger_2_prox_joint", "finger_2_med_joint", "finger_2_dist_joint"
+  ]
+
+  weights_joint_pos: [5.0, 0.0, 0.0,  5.0, 0.0, 0.0]
+
+  # n_fingers = 2: finger_1 → MANO thumb, finger_2 → MANO index
+  target_origin_link_names: [base_link, base_link]
+  target_task_link_names:   [finger_1_dist_link, finger_2_dist_link]
+
+  pinch_origin_link_names: [finger_1_dist_link]
+  pinch_task_link_names:   [finger_2_dist_link]
+
+  # orient_link_pairs: auto-detected from URDF

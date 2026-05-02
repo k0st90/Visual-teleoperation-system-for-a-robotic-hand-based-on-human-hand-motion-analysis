@@ -1,0 +1,47 @@
+retargeting:
+  urdf_path: assets/schunk_hand/schunk_svh_hand_right.urdf
+  wrist_link: right_hand_e1
+  scaling_factor: 1.5
+
+  # 20 DOF — all revolute joints in kinematic-tree order
+  actuated_joints_name: [
+    "right_hand_Thumb_Opposition",      # thumb ABD
+    "right_hand_Thumb_Flexion",
+    "right_hand_j3",
+    "right_hand_j4",
+    "right_hand_j5",                    # ring/pinky section base spread
+    "right_hand_ring_spread",           # ring lateral spread
+    "right_hand_Ring_Finger",
+    "right_hand_j12",
+    "right_hand_j16",
+    "right_hand_Finger_Spread",         # pinky lateral spread
+    "right_hand_Pinky",
+    "right_hand_j13",
+    "right_hand_j17",
+    "right_hand_index_spread",          # index lateral spread
+    "right_hand_Index_Finger_Proximal",
+    "right_hand_Index_Finger_Distal",
+    "right_hand_j14",
+    "right_hand_Middle_Finger_Proximal",
+    "right_hand_Middle_Finger_Distal",
+    "right_hand_j15"
+  ]
+
+  # regularise ABD/spread joints toward 0
+  weights_joint_pos: [
+    5.0, 0.0, 0.0, 0.0,
+    3.0,
+    5.0, 0.0, 0.0, 0.0,
+    5.0, 0.0, 0.0, 0.0,
+    5.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0
+  ]
+
+  # n_fingers = 5
+  target_origin_link_names: [right_hand_e1, right_hand_e1, right_hand_e1, right_hand_e1, right_hand_e1]
+  target_task_link_names:   [thtip, fftip, mftip, rftip, lftip]
+
+  pinch_origin_link_names: [thtip, thtip, thtip, thtip]
+  pinch_task_link_names:   [fftip, mftip, rftip, lftip]
+
+  # orient_link_pairs: auto-detected from URDF

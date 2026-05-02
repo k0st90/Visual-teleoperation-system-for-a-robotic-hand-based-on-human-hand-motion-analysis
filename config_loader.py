@@ -1,22 +1,54 @@
 """
-config_loader.py — loads retargeting YAML configs (extended dex-retargeting format).
+config_loader.py — loads retargeting YAML configs.
 
 YAML format (configs/leap_hand_right.yml):
   retargeting:
-    type: vector
     urdf_path: ...
     wrist_link: ...
     scaling_factor: ...
-    target_origin_link_names: [...]   # wrist vectors origin (dex-compatible)
-    target_task_link_names:   [...]   # wrist vectors task   (dex-compatible)
-    pinch_origin_link_names:  [...]   # pinch vectors origin (mingrui extension)
-    pinch_task_link_names:    [...]   # pinch vectors task   (mingrui extension)
-    orient_link_pairs: [[o,t], ...]   # orient vectors       (mingrui extension)
-    capsule_defs: [[a,b,r], ...]      # capsule definitions
-    capsule_collision_pairs: [[i,j]]  # which capsule pairs to check
+    target_origin_link_names: [...]   # wrist vectors origin
+    target_task_link_names:   [...]   # wrist vectors task
+    pinch_origin_link_names:  [...]   # pinch vectors origin
+    pinch_task_link_names:    [...]   # pinch vectors task
+    orient_link_pairs: [[o,t], ...]   # orient vectors
 """
 
+import xml.etree.ElementTree as ET
+
 import yaml
+
+
+def _urdf_parent_map(urdf_path: str) -> dict:
+    """Returns {frame_name: parent_link} covering both child-link names and joint names.
+    Pinocchio creates frames for both, so we index by both to handle any naming convention.
+    """
+    root = ET.parse(urdf_path).getroot()
+    pmap = {}
+    for j in root.findall("joint"):
+        jname = j.get("name")
+        parent = j.find("parent")
+        child  = j.find("child")
+        if parent is None or child is None:
+            continue
+        parent_link = parent.get("link")
+        pmap[child.get("link")] = parent_link  # frame named after child link
+        pmap[jname]             = parent_link  # frame named after joint (fixed joints)
+    return pmap
+
+
+def _auto_orient_pairs(tip_links: list, urdf_path: str) -> list:
+    """Derive (penultimate, tip) orient pairs from the URDF kinematic tree."""
+    parent_map = _urdf_parent_map(urdf_path)
+    pairs = []
+    for tip in tip_links:
+        parent = parent_map.get(tip)
+        if parent is None:
+            raise ValueError(
+                f"Cannot auto-detect orient pair for '{tip}': "
+                f"frame not found in URDF joint tree of {urdf_path}"
+            )
+        pairs.append((parent, tip))
+    return pairs
 
 
 def load_retargeting_config(yml_path: str) -> dict:
@@ -30,8 +62,6 @@ def load_retargeting_config(yml_path: str) -> dict:
                           [0:4]  wrist vectors
                           [4:7]  pinch vectors
                           [7:11] orient vectors
-      capsule_defs      list of (link_a, link_b, default_radius)
-      capsule_collision_pairs  list of (i, j)
     """
     with open(yml_path, "r") as f:
         raw = yaml.safe_load(f)
@@ -52,8 +82,11 @@ def load_retargeting_config(yml_path: str) -> dict:
     pinch_tasks   = cfg["pinch_task_link_names"]
     pinch_pairs   = list(zip(pinch_origins, pinch_tasks))
 
-    # orient vectors (4)
-    orient_pairs = [tuple(p) for p in cfg["orient_link_pairs"]]
+    # orient vectors — auto-detected from URDF if not specified in config
+    if "orient_link_pairs" in cfg:
+        orient_pairs = [tuple(p) for p in cfg["orient_link_pairs"]]
+    else:
+        orient_pairs = _auto_orient_pairs(wrist_tasks, urdf_path)
 
     n_fingers = len(wrist_pairs)  # number of robot fingers (3–5)
 
@@ -73,23 +106,13 @@ def load_retargeting_config(yml_path: str) -> dict:
     weights_joint_pos_raw = cfg.get("weights_joint_pos", None)
     weights_joint_pos = list(map(float, weights_joint_pos_raw)) if weights_joint_pos_raw is not None else None
 
-    # capsule defs and collision pairs are optional — None means no collision avoidance
-    if "capsule_defs" in cfg and "capsule_collision_pairs" in cfg:
-        capsule_defs            = [(str(a), str(b), float(r)) for a, b, r in cfg["capsule_defs"]]
-        capsule_collision_pairs = [(int(i), int(j)) for i, j in cfg["capsule_collision_pairs"]]
-    else:
-        capsule_defs            = None
-        capsule_collision_pairs = None
-
     return {
-        "urdf_path":               urdf_path,
-        "wrist_link":              wrist_link,
-        "scaling_factor":          scaling_factor,
-        "n_fingers":               n_fingers,
-        "actuated_joints_name":    actuated_joints_name,
-        "touch_joints_name":       touch_joints_name,
-        "weights_joint_pos":       weights_joint_pos,
-        "target_link_pairs":       target_link_pairs,
-        "capsule_defs":            capsule_defs,
-        "capsule_collision_pairs": capsule_collision_pairs,
+        "urdf_path":            urdf_path,
+        "wrist_link":           wrist_link,
+        "scaling_factor":       scaling_factor,
+        "n_fingers":            n_fingers,
+        "actuated_joints_name": actuated_joints_name,
+        "touch_joints_name":    touch_joints_name,
+        "weights_joint_pos":    weights_joint_pos,
+        "target_link_pairs":    target_link_pairs,
     }
