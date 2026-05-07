@@ -23,12 +23,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from wilor_detector import WilorDetector
-from hand_detector import SingleHandDetector
 
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--detector", default="wilor", choices=["wilor", "mediapipe"])
     p.add_argument("--out", default=None)
     p.add_argument("--show", action="store_true")
     return p.parse_args()
@@ -42,10 +40,7 @@ def main():
         args.out = f"data/kps_{ts}.npz"
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 
-    if args.detector == "wilor":
-        detector = WilorDetector(hand_type="Right")
-    else:
-        detector = SingleHandDetector(hand_type="Right")
+    detector = WilorDetector(hand_type="Right")
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():

@@ -128,11 +128,13 @@ def main():
                                   args=(detector, cap, cam_K, det_queue, stop_event),
                                   daemon=True)
     det_thread.start()
-    print("Running. Press Q to quit, R to recalibrate wrist reference.")
+    print("Running. Press Q to quit.")
+
+    # Fixed rotation: WiLoR camera frame → PyBullet world frame
+    R_CAM2WORLD = sciR.from_euler("x", -90, degrees=True).as_matrix()
 
     frame_idx = 0
     t_prev = time.time()
-    wrist_rot_ref = None
     wrist_quat_smooth = np.array([0.0, 0.0, 0.0, 1.0])
     WRIST_EMA = 0.15
     last_result = None
@@ -147,15 +149,9 @@ def main():
             bgr, hand_kps, keypoint_2d, wrist_pose_in_cam, wrist_rot = last_result
 
             if hand_kps is not None:
-                using_pnp = wrist_pose_in_cam is not None
-                R_cur = wrist_pose_in_cam[:3, :3] if using_pnp else wrist_rot
-                if frame_idx % 60 == 0:
-                    print(f"  wrist rot source: {'PnP' if using_pnp else 'SVD fallback'}")
-                if wrist_rot_ref is None:
-                    wrist_rot_ref = R_cur.copy()
-                    print("Wrist reference set.")
-                R_rel = wrist_rot_ref.T @ R_cur
-                q_new = sciR.from_matrix(R_rel).as_quat()
+                R_cur = wrist_pose_in_cam[:3, :3] if wrist_pose_in_cam is not None else wrist_rot
+                R_world = R_CAM2WORLD @ R_cur
+                q_new = sciR.from_matrix(R_world).as_quat()
                 if np.dot(q_new, wrist_quat_smooth) < 0:
                     q_new = -q_new
                 wrist_quat_smooth = WRIST_EMA * q_new + (1.0 - WRIST_EMA) * wrist_quat_smooth
@@ -165,9 +161,6 @@ def main():
                 qpos = mlp.retarget(hand_kps)
                 apply_qpos(hand_id, joint_indices, qpos, mapping)
                 annotated = detector.draw_skeleton_on_image(bgr, keypoint_2d)
-                rot_label = "rot: PnP" if using_pnp else "rot: SVD"
-                cv2.putText(annotated, rot_label, (10, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
             else:
                 annotated = bgr
         else:
@@ -186,10 +179,6 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             break
-        elif key == ord("r"):
-            wrist_rot_ref = None
-            wrist_quat_smooth = np.array([0.0, 0.0, 0.0, 1.0])
-            print("Wrist reference cleared — will recalibrate on next detection.")
 
     stop_event.set()
     det_thread.join(timeout=2.0)

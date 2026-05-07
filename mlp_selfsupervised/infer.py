@@ -59,7 +59,7 @@ class OneEuroFilter:
 class MLPRetargeter:
     def __init__(self, checkpoint_path: str, device: str = "cpu",
                  min_cutoff: float = 0.3, beta: float = 0.02):
-        ckpt = torch.load(checkpoint_path, map_location=device)
+        ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
         self.model = RetargeterMLP(
             n_doa=ckpt["n_doa"],
             joint_lb=ckpt["joint_lb"],
