@@ -87,9 +87,10 @@ def main():
                         help="Path to retargeting config YAML")
     parser.add_argument("--checkpoint", default=None,
                         help="MLP checkpoint path (default: checkpoints/mlp_ss_<config_stem>_best.pt)")
-    parser.add_argument("--cam-distance", type=float, default=0.4)
-    parser.add_argument("--cam-yaw",      type=float, default=45.0)
-    parser.add_argument("--cam-pitch",    type=float, default=-30.0)
+    parser.add_argument("--cam-distance",  type=float, default=0.4)
+    parser.add_argument("--cam-yaw",       type=float, default=45.0)
+    parser.add_argument("--cam-pitch",     type=float, default=-30.0)
+    parser.add_argument("--assets-path",   type=str,   default=None)
     parser.add_argument("--min-cutoff",   type=float, default=0.3)
     parser.add_argument("--beta",         type=float, default=0.02)
     args = parser.parse_args()
@@ -97,7 +98,7 @@ def main():
     import pathlib
     from config_loader import load_retargeting_config
     hand_name = pathlib.Path(args.config).stem
-    urdf_path  = load_retargeting_config(args.config)["urdf_path"]
+    urdf_path  = load_retargeting_config(args.config, args.assets_path)["urdf_path"]
     print(f"Config: {args.config}  |  URDF: {urdf_path}")
 
     hand_id = setup_pybullet(urdf_path, args.cam_distance, args.cam_yaw, args.cam_pitch)
@@ -106,7 +107,7 @@ def main():
     from mlp_selfsupervised.infer import MLPRetargeter
 
     detector = WilorDetector(hand_type="Right")
-    retargeter = HandRetargeter(yml_path=args.config)
+    retargeter = HandRetargeter(yml_path=args.config, assets_path=args.assets_path)
 
     ckpt = args.checkpoint or f"checkpoints/mlp_ss_{hand_name}_best.pt"
     mlp = MLPRetargeter(ckpt, min_cutoff=args.min_cutoff, beta=args.beta)

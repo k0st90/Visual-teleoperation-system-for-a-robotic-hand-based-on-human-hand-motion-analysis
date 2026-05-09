@@ -187,6 +187,19 @@ class SelfSupervisedLoss(nn.Module):
 
         return links_vec_cost + joint_pos_cost
 
+    def forward_with_components(self, kps_raw_batch, qpos_pred):
+        """Same as forward but returns (total, links_vec, joint_pos)."""
+        B = kps_raw_batch.shape[0]
+        link_positions = self.fk_fn(qpos_pred)
+        robot_origin = link_positions[:, self.origin_idx, :]
+        robot_task   = link_positions[:, self.task_idx,   :]
+        robot_vecs   = robot_task - robot_origin
+        ref_vecs, weights = self._build_ref_vecs_batch(kps_raw_batch)
+        vec_err = torch.norm(robot_vecs - ref_vecs, dim=-1)
+        links_vec_cost = self.huber(weights * vec_err, torch.zeros_like(vec_err)).mean()
+        joint_pos_cost = self.huber(self.wjpos * qpos_pred, torch.zeros_like(qpos_pred)).mean()
+        return links_vec_cost + joint_pos_cost, links_vec_cost, joint_pos_cost
+
     def _build_ref_vecs_batch(self, kps_raw: torch.Tensor):
         """
         Vectorised version of HandRetargeter._build_ref_values() — only the
@@ -263,19 +276,21 @@ class SelfSupervisedLoss(nn.Module):
 # ─── training loop ────────────────────────────────────────────────────────────
 
 def train(args):
+    import time as _time
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device}")
 
     yml_path = args.config
     import pathlib
     hand_name = pathlib.Path(args.config).stem
+    run_id    = args.run_id or _time.strftime("%Y%m%d_%H%M%S")
     print(f"Loading retargeter: {yml_path}")
-    retargeter = HandRetargeter(yml_path=yml_path)
+    retargeter = HandRetargeter(yml_path=yml_path, assets_path=args.assets_path)
     n_doa      = retargeter.robot_adaptor.doa
     joint_lb   = retargeter.optimizer.joint_limits[:, 0]
     joint_ub   = retargeter.optimizer.joint_limits[:, 1]
     from config_loader import load_retargeting_config
-    urdf_path  = load_retargeting_config(yml_path)["urdf_path"]
+    urdf_path  = load_retargeting_config(yml_path, args.assets_path)["urdf_path"]
 
     # all link names the optimizer uses (origin + task + wrist)
     link_names = retargeter.optimizer.computed_links_name
@@ -368,30 +383,38 @@ def train(args):
 
         # validation
         model.eval()
-        val_loss = 0.0
+        val_loss = val_links = val_jpos = 0.0
         with torch.no_grad():
             for kps_norm, kps_raw in val_loader:
                 kps_norm = kps_norm.to(device)
                 kps_raw  = kps_raw.to(device)
                 qpos_pred = model(kps_norm)
-                val_loss += loss_fn(kps_raw, qpos_pred).item()
+                total, lv, jp = loss_fn.forward_with_components(kps_raw, qpos_pred)
+                val_loss  += total.item()
+                val_links += lv.item()
+                val_jpos  += jp.item()
 
-        avg_train = train_loss / len(train_loader)
-        avg_val   = val_loss   / len(val_loader)
-        elapsed   = time.time() - t0
+        avg_train  = train_loss / len(train_loader)
+        avg_val    = val_loss   / len(val_loader)
+        avg_links  = val_links  / len(val_loader)
+        avg_jpos   = val_jpos   / len(val_loader)
+        elapsed    = time.time() - t0
+        is_best    = avg_val < best_val
 
         print(f"Epoch {epoch:3d}/{args.epochs}  "
               f"train={avg_train:.5f}  val={avg_val:.5f}  "
-              f"lr={scheduler.get_last_lr()[0]:.2e}  ({elapsed:.1f}s)")
+              f"links={avg_links:.5f}  jpos={avg_jpos:.5f}  "
+              f"lr={scheduler.get_last_lr()[0]:.2e}  "
+              f"time={elapsed:.1f}  best={'yes' if is_best else 'no'}")
 
-        if avg_val < best_val:
+        if is_best:
             best_val = avg_val
-            _save(model, f"checkpoints/mlp_ss_{hand_name}_best.pt", dataset)
-            print(f"  → saved best (val={best_val:.5f})")
+            _save(model, f"checkpoints/mlp_ss_{hand_name}_{run_id}_best.pt", dataset)
+            print(f"  -> saved best (val={best_val:.5f})")
 
-    _save(model, f"checkpoints/mlp_ss_{hand_name}_last.pt", dataset)
+    _save(model, f"checkpoints/mlp_ss_{hand_name}_{run_id}_last.pt", dataset)
     print(f"\nDone. Best val loss: {best_val:.5f}")
-    print(f"Best checkpoint: checkpoints/mlp_ss_{hand_name}_best.pt")
+    print(f"Best checkpoint: checkpoints/mlp_ss_{hand_name}_{run_id}_best.pt")
 
 
 def parse_args():
@@ -403,6 +426,10 @@ def parse_args():
     p.add_argument("--batch-size", type=int,   default=256)
     p.add_argument("--lr",         type=float, default=1e-3)
     p.add_argument("--hidden",     type=int,   default=256)
+    p.add_argument("--run-id",      type=str,  default=None,
+                   help="Unique suffix for checkpoint filenames (default: timestamp)")
+    p.add_argument("--assets-path", type=str,  default=None,
+                   help="Path to hand assets folder")
     return p.parse_args()
 
 

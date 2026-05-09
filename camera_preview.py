@@ -27,10 +27,11 @@ def main():
     p.add_argument("--cam-yaw",      type=float, default=45.0)
     p.add_argument("--cam-pitch",    type=float, default=-30.0)
     p.add_argument("--out",          default=None, help="File to write camera params")
+    p.add_argument("--assets-path",  default=None)
     args = p.parse_args()
 
-    cfg      = load_retargeting_config(args.config)
-    urdf     = cfg["urdf_path"]
+    cfg  = load_retargeting_config(args.config, args.assets_path)
+    urdf = cfg["urdf_path"]
 
     pb.connect(pb.GUI)
     pb.setAdditionalSearchPath(pybullet_data.getDataPath())

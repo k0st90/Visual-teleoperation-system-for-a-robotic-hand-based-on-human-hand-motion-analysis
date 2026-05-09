@@ -54,7 +54,7 @@ WEIGHTS_JOINT_POS = np.array([
 
 
 class HandRetargeter:
-    def __init__(self, urdf_path: str = None, hand_scale: float = 1.5, yml_path: str = None):
+    def __init__(self, urdf_path: str = None, hand_scale: float = 1.5, yml_path: str = None, assets_path: str = None):
         """
         Args:
             urdf_path:   path to leap_hand_right.urdf (used when yml_path is None)
@@ -63,7 +63,7 @@ class HandRetargeter:
         """
         # load from yml if provided, otherwise fall back to hardcoded defaults
         if yml_path is not None:
-            cfg = load_retargeting_config(yml_path)
+            cfg = load_retargeting_config(yml_path, assets_path)
             urdf_path            = cfg["urdf_path"]
             link_pairs           = cfg["target_link_pairs"]
             wrist_link           = cfg["wrist_link"]

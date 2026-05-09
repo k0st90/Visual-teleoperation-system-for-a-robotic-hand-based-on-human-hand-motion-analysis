@@ -41,9 +41,10 @@ def parse_args():
     p.add_argument("--out",        default=None, help="Output video path")
     p.add_argument("--fps",          type=float, default=None,
                    help="Output FPS (default: same as input)")
-    p.add_argument("--cam-distance", type=float, default=1.1)
-    p.add_argument("--cam-yaw",      type=float, default=45.0)
-    p.add_argument("--cam-pitch",    type=float, default=-30.0)
+    p.add_argument("--cam-distance",  type=float, default=1.1)
+    p.add_argument("--cam-yaw",       type=float, default=45.0)
+    p.add_argument("--cam-pitch",     type=float, default=-30.0)
+    p.add_argument("--assets-path",   type=str,   default=None)
     p.add_argument("--min-cutoff",   type=float, default=0.3)
     p.add_argument("--beta",         type=float, default=0.02)
     return p.parse_args()
@@ -107,7 +108,7 @@ def main():
         sys.exit(1)
 
     hand_name = pathlib.Path(args.config).stem
-    cfg = load_retargeting_config(args.config)
+    cfg = load_retargeting_config(args.config, args.assets_path)
     urdf_path = cfg["urdf_path"]
 
     ckpt = args.checkpoint or f"checkpoints/mlp_ss_{hand_name}_best.pt"
@@ -120,7 +121,7 @@ def main():
     print(f"Input:      {args.input}")
 
     detector  = WilorDetector(hand_type="Right")
-    retargeter = HandRetargeter(yml_path=args.config)
+    retargeter = HandRetargeter(yml_path=args.config, assets_path=args.assets_path)
     mlp       = MLPRetargeter(ckpt, min_cutoff=args.min_cutoff, beta=args.beta)
 
     hand_id = setup_pybullet(urdf_path)

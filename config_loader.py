@@ -13,6 +13,7 @@ YAML format (configs/leap_hand_right.yml):
     orient_link_pairs: [[o,t], ...]   # orient vectors
 """
 
+import os
 import xml.etree.ElementTree as ET
 
 import yaml
@@ -51,7 +52,7 @@ def _auto_orient_pairs(tip_links: list, urdf_path: str) -> list:
     return pairs
 
 
-def load_retargeting_config(yml_path: str) -> dict:
+def load_retargeting_config(yml_path: str, assets_path: str = None) -> dict:
     """Load and parse a retargeting YAML config file.
 
     Returns a dict with keys:
@@ -68,7 +69,10 @@ def load_retargeting_config(yml_path: str) -> dict:
 
     cfg = raw["retargeting"]
 
-    urdf_path      = cfg["urdf_path"]
+    urdf_path = cfg["urdf_path"]
+    if not os.path.isabs(urdf_path):
+        base = assets_path if assets_path else os.path.dirname(os.path.abspath(yml_path))
+        urdf_path = os.path.join(base, urdf_path)
     wrist_link     = cfg["wrist_link"]
     scaling_factor = float(cfg.get("scaling_factor", 1.5))
 
