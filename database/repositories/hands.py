@@ -5,14 +5,14 @@ from database.connection import get_connection, get_cursor
 def get_or_create(name: str, yml_path: str, assets_path: str) -> int:
     with get_connection() as conn:
         with get_cursor(conn) as cur:
-            cur.execute("SELECT id FROM hands WHERE name = %s", (name,))
-            row = cur.fetchone()
-            if row:
-                return row["id"]
-            cur.execute(
-                "INSERT INTO hands (name, yml_path, assets_path) VALUES (%s, %s, %s) RETURNING id",
-                (name, yml_path, assets_path)
-            )
+            cur.execute("""
+                INSERT INTO hands (name, yml_path, assets_path)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (name) DO UPDATE
+                    SET yml_path    = EXCLUDED.yml_path,
+                        assets_path = EXCLUDED.assets_path
+                RETURNING id
+            """, (name, yml_path, assets_path))
             hand_id = cur.fetchone()["id"]
         conn.commit()
     return hand_id

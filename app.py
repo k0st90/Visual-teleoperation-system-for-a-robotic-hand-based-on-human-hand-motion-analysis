@@ -8,11 +8,15 @@ Usage:
 import os
 import sys
 import glob
+import shutil
 import subprocess
 import threading
-import shutil
 import re
 import tempfile
+import time
+import webbrowser
+
+import cv2
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -25,9 +29,7 @@ from database.repositories import usage_sessions as sessions_repo
 from database.repositories import training_epochs as epochs_repo
 
 BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
-CONFIGS_DIR   = os.path.join(BASE_DIR, "configs")
 VIDEO_DIR     = os.path.join(BASE_DIR, "video")
-ORIGINALS_DIR = os.path.join(VIDEO_DIR, "originals")
 RETARGETED_DIR= os.path.join(VIDEO_DIR, "retargeted")
 CKPT_DIR      = os.path.join(BASE_DIR, "checkpoints")
 DATA_DIR      = os.path.join(BASE_DIR, "data")
@@ -48,14 +50,16 @@ def get_hands():
 
 def get_originals():
     try:
-        return [row["filename"] for row in videos_repo.get_all_originals()]
+        return [{"filename": row["filename"], "full_path": row["full_path"]}
+                for row in videos_repo.get_all_originals()]
     except Exception:
         return []
 
 
 def get_retargeted():
     try:
-        return [row["filename"] for row in videos_repo.get_all_retargeted()]
+        return [{"filename": row["filename"], "full_path": row["full_path"]}
+                for row in videos_repo.get_all_retargeted()]
     except Exception:
         return []
 
@@ -111,6 +115,51 @@ class ProgressDialog(ctk.CTkToplevel):
         self.close()
 
 
+class EpochsDialog(ctk.CTkToplevel):
+    def __init__(self, parent, hand_name: str):
+        super().__init__(parent)
+        self.title("Параметри навчання")
+        self.geometry("340x160")
+        self.resizable(False, False)
+        self.after(200, self.grab_set)
+        self.result = None
+
+        ctk.CTkLabel(self, text=f"Кількість епох для '{hand_name}':",
+                     font=ctk.CTkFont(size=13)).pack(pady=(20, 6), padx=20, anchor="w")
+
+        self._entry = ctk.CTkEntry(self, placeholder_text="наприклад: 100")
+        self._entry.pack(fill="x", padx=20)
+        self._entry.insert(0, "100")
+        self._entry.select_range(0, "end")
+        self._entry.focus()
+
+        self._err = ctk.CTkLabel(self, text="", text_color="#e74c3c",
+                                 font=ctk.CTkFont(size=11))
+        self._err.pack(pady=(4, 0), padx=20, anchor="w")
+
+        btns = ctk.CTkFrame(self, fg_color="transparent")
+        btns.pack(fill="x", padx=20, pady=(6, 16))
+        ctk.CTkButton(btns, text="Скасувати", fg_color="gray30",
+                      hover_color="gray40", command=self.destroy).pack(side="left")
+        ctk.CTkButton(btns, text="Почати навчання",
+                      command=self._ok).pack(side="right")
+
+        self._entry.bind("<Return>", lambda e: self._ok())
+
+    def _ok(self):
+        val = self._entry.get().strip()
+        try:
+            n = int(val)
+            if n < 1:
+                raise ValueError
+        except ValueError:
+            self._err.configure(text="Введіть ціле число більше 0")
+            self._entry.focus()
+            return
+        self.result = n
+        self.destroy()
+
+
 class TrainingProgressDialog(ctk.CTkToplevel):
     def __init__(self, parent, hand_name: str, on_cancel):
         super().__init__(parent)
@@ -159,8 +208,8 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Hand Teleop System")
-        self.geometry("960x780")
-        self.resizable(False, False)
+        self.geometry("960x920")
+        self.resizable(False, True)
 
         self._process           = None
         self._selected_video    = None
@@ -191,7 +240,11 @@ class App(ctk.CTk):
                      font=ctk.CTkFont(size=11), text_color="gray").pack(pady=(0, 18))
 
         # Hand
-        ctk.CTkLabel(sb, text="Роботична кисть", anchor="w").pack(fill="x", padx=16)
+        hand_hdr = ctk.CTkFrame(sb, fg_color="transparent")
+        hand_hdr.pack(fill="x", padx=16)
+        ctk.CTkLabel(hand_hdr, text="Роботична кисть", anchor="w").pack(side="left")
+        ctk.CTkButton(hand_hdr, text="＋ Нова", width=72, height=24,
+                      command=self._add_hand).pack(side="right")
         hands = get_hands()
         self._hand_var = ctk.StringVar(value=hands[0] if hands else "")
         self._hand_menu = ctk.CTkOptionMenu(
@@ -256,8 +309,10 @@ class App(ctk.CTk):
                 command=lambda v, l=lbl: l.configure(text=f"{float(v):.2f}")
             ).pack(side="left", fill="x", expand=True, padx=4)
 
-        # Buttons
-        ctk.CTkFrame(sb, height=1, fg_color="gray30").pack(fill="x", padx=16, pady=12)
+        # ── Група 1: Запуск ───────────────────────────────────────────────────
+        ctk.CTkFrame(sb, height=1, fg_color="gray30").pack(fill="x", padx=16, pady=(12, 6))
+        ctk.CTkLabel(sb, text="КЕРУВАННЯ", font=ctk.CTkFont(size=10, weight="bold"),
+                     text_color="gray50", anchor="w").pack(fill="x", padx=18, pady=(0, 4))
 
         self._start_btn = ctk.CTkButton(sb, text="▶  Запустити",
                                         height=36, command=self._start)
@@ -269,23 +324,14 @@ class App(ctk.CTk):
             command=self._stop, state="disabled")
         self._stop_btn.pack(fill="x", padx=16, pady=3)
 
-        ctk.CTkButton(sb, text="＋  Додати нову руку",
-                      height=34, fg_color="gray30", hover_color="gray40",
-                      command=self._add_hand).pack(fill="x", padx=16, pady=(10, 4))
-
-        ctk.CTkButton(sb, text="📈  Графіки навчання",
-                      height=34, fg_color="gray30", hover_color="gray40",
-                      command=self._show_training_charts).pack(fill="x", padx=16, pady=(2, 4))
-
         # ── Right panel ───────────────────────────────────────────────────────
         right = ctk.CTkFrame(self, corner_radius=0, fg_color="gray14")
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_rowconfigure(1, weight=1)
         right.grid_rowconfigure(3, weight=1)
-        right.grid_rowconfigure(4, weight=0)
         right.grid_columnconfigure(0, weight=1)
 
-        # Originals section header
+        # row=0  Галерея відео header ──────────────────────────────────────────
         orig_hdr = ctk.CTkFrame(right, fg_color="transparent")
         orig_hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 4))
         ctk.CTkLabel(orig_hdr, text="Галерея відео",
@@ -296,26 +342,52 @@ class App(ctk.CTk):
         ctk.CTkButton(orig_hdr, text="＋ Додати", width=90, height=28,
                       command=self._add_to_gallery).pack(side="right")
 
-        self._orig_list = ctk.CTkScrollableFrame(right, height=140)
-        self._orig_list.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 6))
+        # row=3  Orig list (expandable) ────────────────────────────────────────
+        self._orig_list = ctk.CTkScrollableFrame(right, height=120)
+        self._orig_list.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 4))
 
-        # Retargeted section
+        # row=4  Retargeted header ─────────────────────────────────────────────
         ctk.CTkLabel(right, text="Ретаргетовані відео",
                      font=ctk.CTkFont(size=13, weight="bold")).grid(
             row=2, column=0, sticky="w", padx=16, pady=(4, 4))
 
-        self._ret_list = ctk.CTkScrollableFrame(right, height=140)
-        self._ret_list.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 6))
+        # row=5  Ret list (expandable) ─────────────────────────────────────────
+        self._ret_list = ctk.CTkScrollableFrame(right, height=120)
+        self._ret_list.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 4))
 
+        # row=6  Hint ──────────────────────────────────────────────────────────
         ctk.CTkLabel(right, text="2× клік — відкрити   |   ПКМ — видалити",
                      font=ctk.CTkFont(size=10), text_color="gray40").grid(
-            row=4, column=0, sticky="w", padx=16, pady=(0, 4))
+            row=4, column=0, sticky="w", padx=16, pady=(0, 2))
 
-        # Status bar
+        # row=7  Separator ─────────────────────────────────────────────────────
+        ctk.CTkFrame(right, height=1, fg_color="gray30").grid(
+            row=5, column=0, sticky="ew", padx=16, pady=(6, 0))
+
+        # row=8  ІНСТРУМЕНТИ ───────────────────────────────────────────────────
+        tools_hdr = ctk.CTkFrame(right, fg_color="transparent")
+        tools_hdr.grid(row=6, column=0, sticky="ew", padx=16, pady=(6, 6))
+        ctk.CTkLabel(tools_hdr, text="ІНСТРУМЕНТИ",
+                     font=ctk.CTkFont(size=10, weight="bold"),
+                     text_color="gray50").pack(side="left")
+        ctk.CTkButton(tools_hdr, text="🗑  Видалити руку",
+                      width=150, height=28,
+                      fg_color="#5a1a1a", hover_color="#7a2a2a",
+                      command=self._delete_hand).pack(side="right", padx=(6, 0))
+        ctk.CTkButton(tools_hdr, text="💾  Checkpoint",
+                      width=130, height=28,
+                      fg_color="gray30", hover_color="gray40",
+                      command=self._export_checkpoint).pack(side="right", padx=(6, 0))
+        ctk.CTkButton(tools_hdr, text="📈  Графіки",
+                      width=110, height=28,
+                      fg_color="gray30", hover_color="gray40",
+                      command=self._show_training_charts).pack(side="right", padx=(6, 0))
+
+        # row=9  Status bar ────────────────────────────────────────────────────
         self._status_var = ctk.StringVar(value="Готово")
         ctk.CTkLabel(right, textvariable=self._status_var,
                      font=ctk.CTkFont(size=11), text_color="gray").grid(
-            row=5, column=0, sticky="w", padx=16, pady=(0, 8))
+            row=7, column=0, sticky="w", padx=16, pady=(0, 8))
 
         self._selected      = {"orig": None, "ret": None}
         self._last_selected = None  # ("orig"|"ret", name)
@@ -362,7 +434,6 @@ class App(ctk.CTk):
             pass
 
     def _show_training_charts(self):
-        import tempfile, webbrowser
         try:
             import plotly.graph_objects as go
             from plotly.subplots import make_subplots
@@ -424,35 +495,36 @@ class App(ctk.CTk):
 
             kw_hover = dict(hovertemplate="%{text}<extra></extra>", text=hover)
 
+            lg_t = f"{run_label}_train"
+            lg_v = f"{run_label}_val"
+
             fig.add_trace(go.Scatter(x=xs, y=train_l,
                 name=f"{run_label} train",
+                legendgroup=lg_t,
                 line=dict(color=color, width=1.5, dash="dot"),
                 **kw_hover), row=1, col=1)
             fig.add_trace(go.Scatter(x=xs, y=val_l,
                 name=f"{run_label} val",
+                legendgroup=lg_v,
                 line=dict(color=color, width=2),
                 **kw_hover), row=1, col=1)
             fig.add_trace(go.Scatter(x=best_xs, y=best_vals,
                 name="best", mode="markers",
+                legendgroup=lg_v,
                 marker=dict(color="white", size=9, symbol="star",
                             line=dict(color=color, width=1.5)),
                 hoverinfo="skip", showlegend=False), row=1, col=1)
-            fig.add_trace(go.Scatter(x=xs, y=links_l,
-                name=f"{run_label} links",
-                line=dict(color=color, width=2),
-                showlegend=False, **kw_hover), row=2, col=1)
-            fig.add_trace(go.Scatter(x=xs, y=jpos_l,
-                name=f"{run_label} jpos",
-                line=dict(color=color, width=2),
-                showlegend=False, **kw_hover), row=3, col=1)
-            fig.add_trace(go.Scatter(x=xs, y=lr_l,
-                name=f"{run_label} lr",
-                line=dict(color=color, width=2),
-                showlegend=False, **kw_hover), row=4, col=1)
-            fig.add_trace(go.Scatter(x=xs, y=time_l,
-                name=f"{run_label} time",
-                line=dict(color=color, width=2),
-                showlegend=False, **kw_hover), row=5, col=1)
+
+            # підграфіки — дублюються в обох групах; hover тільки в train-копії
+            for y_data, row_n in [(links_l, 2), (jpos_l, 3), (lr_l, 4), (time_l, 5)]:
+                fig.add_trace(go.Scatter(x=xs, y=y_data,
+                    legendgroup=lg_t, showlegend=False,
+                    line=dict(color=color, width=2),
+                    hovertemplate="%{y:.5g}<extra></extra>"), row=row_n, col=1)
+                fig.add_trace(go.Scatter(x=xs, y=y_data,
+                    legendgroup=lg_v, showlegend=False,
+                    line=dict(color=color, width=2),
+                    hovertemplate="%{y:.5g}<extra></extra>"), row=row_n, col=1)
 
         fig.update_layout(
             title=dict(text=f"Навчання — {hand}", x=0.5, xanchor="center",
@@ -479,6 +551,26 @@ class App(ctk.CTk):
         tmp.write(dark_html)
         tmp.close()
         webbrowser.open(f"file:///{tmp.name}")
+
+    def _export_checkpoint(self):
+        hand = self._hand_var.get()
+        if not hand:
+            messagebox.showerror("Помилка", "Спочатку оберіть руку")
+            return
+        model_row = models_repo.get_latest(hand)
+        if not model_row or not os.path.isfile(model_row["checkpoint_path"]):
+            messagebox.showerror("Помилка", f"Checkpoint для '{hand}' не знайдено")
+            return
+        src = model_row["checkpoint_path"]
+        dst = filedialog.asksaveasfilename(
+            title="Зберегти checkpoint як...",
+            initialfile=os.path.basename(src),
+            defaultextension=".pt",
+            filetypes=[("PyTorch checkpoint", "*.pt"), ("All", "*.*")])
+        if not dst:
+            return
+        shutil.copy2(src, dst)
+        self._status_var.set(f"Checkpoint збережено: {os.path.basename(dst)}")
 
     def _cam_text(self):
         return (f"dist={self._cam_distance:.2f}  "
@@ -581,34 +673,36 @@ class App(ctk.CTk):
             ctk.CTkLabel(frame, text="Порожньо", text_color="gray").pack(pady=10)
             return
         self._btn_refs[key] = {}
-        for name in items:
-            is_sel  = self._selected.get(key) == name
-            bg      = "#1f538d" if is_sel else "#2b2b2b"
+        for item in items:
+            path     = item["full_path"]
+            label    = item["filename"]
+            is_sel   = self._selected.get(key) == path
+            bg       = "#1f538d" if is_sel else "#2b2b2b"
             row = ctk.CTkFrame(frame, fg_color=bg, corner_radius=6, height=32)
             row.pack(fill="x", pady=2)
             row.pack_propagate(False)
-            lbl = ctk.CTkLabel(row, text=name, anchor="w",
+            lbl = ctk.CTkLabel(row, text=label, anchor="w",
                                fg_color="transparent",
                                font=ctk.CTkFont(size=12))
             lbl.pack(fill="both", expand=True, padx=10)
 
             for widget in (row, lbl):
                 widget.bind("<Button-1>",
-                            lambda e, n=name, k=key: self._select(n, k))
+                            lambda e, p=path, k=key: self._select(p, k))
                 widget.bind("<Double-Button-1>",
-                            lambda e, n=name, k=key: self._open_video(n, k))
+                            lambda e, p=path, k=key: self._open_video(p, k))
                 widget.bind("<Button-3>",
-                            lambda e, n=name, k=key: self._ctx_menu(e, n, k))
+                            lambda e, p=path, k=key: self._ctx_menu(e, p, k))
                 widget.bind("<Enter>",
-                            lambda e, r=row, n=name, k=key: r.configure(
-                                fg_color="#2563a8" if self._selected.get(k)==n else "#3a3a3a"))
+                            lambda e, r=row, p=path, k=key: r.configure(
+                                fg_color="#2563a8" if self._selected.get(k)==p else "#3a3a3a"))
                 widget.bind("<Leave>",
-                            lambda e, r=row, n=name, k=key: r.configure(
-                                fg_color="#1f538d" if self._selected.get(k)==n else "#2b2b2b"))
+                            lambda e, r=row, p=path, k=key: r.configure(
+                                fg_color="#1f538d" if self._selected.get(k)==p else "#2b2b2b"))
 
-            self._btn_refs[key][name] = row
+            self._btn_refs[key][path] = row
 
-    def _select(self, name, key):
+    def _select(self, path, key):
         # deselect other list
         other = "ret" if key == "orig" else "orig"
         prev_other = self._selected.get(other)
@@ -621,56 +715,67 @@ class App(ctk.CTk):
         if prev and prev in self._btn_refs.get(key, {}):
             self._btn_refs[key][prev].configure(fg_color="#2b2b2b")
 
-        self._selected[key]  = name
-        self._last_selected  = (key, name)
+        self._selected[key]  = path
+        self._last_selected  = (key, path)
 
-        if name in self._btn_refs.get(key, {}):
-            self._btn_refs[key][name].configure(fg_color="#1f538d")
+        if path in self._btn_refs.get(key, {}):
+            self._btn_refs[key][path].configure(fg_color="#1f538d")
 
         if key == "orig" and self._mode.get() == "video":
-            try:
-                row = videos_repo.get_original_by_filename(name)
-                self._input_video_path = row["full_path"] if row else None
-            except Exception:
-                self._input_video_path = None
-            self._vpick_label.configure(text=name)
+            self._input_video_path = path
+            self._vpick_label.configure(text=os.path.basename(path))
 
-    def _open_video(self, name, key):
-        try:
-            if key == "orig":
-                row = videos_repo.get_original_by_filename(name)
-            else:
-                rows = videos_repo.get_all_retargeted()
-                row = next((r for r in rows if r["filename"] == name), None)
-            if row and os.path.exists(row["full_path"]):
-                os.startfile(row["full_path"])
+    def _open_video(self, path, key):
+        if os.path.exists(path):
+            os.startfile(path)
+            return
+        if key == "ret":
+            fallback = os.path.join(RETARGETED_DIR, os.path.basename(path))
+            if os.path.exists(fallback):
+                os.startfile(fallback)
                 return
-        except Exception:
-            pass
-        folder = ORIGINALS_DIR if key == "orig" else RETARGETED_DIR
-        os.startfile(os.path.join(folder, name))
+        if messagebox.askyesno(
+            "Файл не знайдено",
+            f"Файл не знайдено за шляхом:\n{path}\n\nВидалити запис з галереї?",
+            icon="warning"
+        ):
+            self._delete_item(path, key)
 
-    def _ctx_menu(self, event, name, key):
+    def _ctx_menu(self, event, path, key):
         from tkinter import Menu
         m = Menu(self, tearoff=0)
-        m.add_command(label=f"Видалити  '{name}'",
-                      command=lambda: self._delete_item(name, key))
+        if key == "ret":
+            m.add_command(label=f"Вивантажити  '{os.path.basename(path)}'",
+                          command=lambda: self._export_video(path))
+            m.add_separator()
+        m.add_command(label=f"Видалити  '{os.path.basename(path)}'",
+                      command=lambda: self._delete_item(path, key))
         m.tk_popup(event.x_root, event.y_root)
 
-    def _delete_item(self, name, key):
-        if not messagebox.askyesno("Видалення", f"Видалити '{name}'?"):
+    def _export_video(self, path):
+        if not os.path.exists(path):
+            messagebox.showerror("Помилка", f"Файл не знайдено:\n{path}")
+            return
+        dst_dir = filedialog.askdirectory(title="Оберіть папку для збереження")
+        if not dst_dir:
+            return
+        dst = os.path.join(dst_dir, os.path.basename(path))
+        shutil.copy2(path, dst)
+        self._status_var.set(f"Збережено: {os.path.basename(dst)}")
+
+    def _delete_item(self, path, key):
+        if not messagebox.askyesno("Видалення", f"Видалити '{os.path.basename(path)}'?"):
             return
         try:
             if key == "orig":
-                videos_repo.delete_original(name)
+                videos_repo.delete_original(path)
             else:
-                path = os.path.join(RETARGETED_DIR, name)
                 if os.path.exists(path):
                     os.remove(path)
-                videos_repo.delete_retargeted(name)
+                videos_repo.delete_retargeted(path)
         except Exception as e:
             print(f"[db] delete error: {e}")
-        if self._last_selected == (key, name):
+        if self._last_selected == (key, path):
             self._last_selected = None
         self._selected[key] = None
         self._refresh_lists()
@@ -689,7 +794,10 @@ class App(ctk.CTk):
             return
 
         row         = hands_repo.get_by_name(hand)
-        config      = row["yml_path"]      if row else os.path.join(CONFIGS_DIR, f"{hand}.yml")
+        config      = row["yml_path"] if row else None
+        if not config:
+            messagebox.showerror("Помилка", f"Руку '{hand}' не знайдено в БД")
+            return
         assets_path = row["assets_path"]   if row else None
 
         model_row = models_repo.get_latest(hand)
@@ -717,9 +825,19 @@ class App(ctk.CTk):
                 messagebox.showerror("Помилка",
                     "Оберіть відео з галереї (клік на відео в списку 'Галерея відео')")
                 return
-            import time as _time
+            if not os.path.exists(self._input_video_path):
+                if messagebox.askyesno(
+                    "Файл не знайдено",
+                    f"Файл не знайдено за шляхом:\n{self._input_video_path}\n\n"
+                    "Видалити запис з галереї?",
+                    icon="warning"
+                ):
+                    self._delete_item(self._input_video_path, "orig")
+                    self._input_video_path = None
+                    self._vpick_label.configure(text="не обрано — оберіть з галереї")
+                return
             base = os.path.splitext(os.path.basename(self._input_video_path))[0]
-            ts   = _time.strftime("%Y%m%d_%H%M%S")
+            ts   = time.strftime("%Y%m%d_%H%M%S")
             out  = os.path.join(RETARGETED_DIR, f"{base}_{hand}_{ts}.mp4")
             self._last_retarget_out = out
             cmd = [sys.executable, os.path.join(BASE_DIR, "video_retarget.py"),
@@ -806,8 +924,7 @@ class App(ctk.CTk):
                 videos_repo.add_retargeted(
                     filename=os.path.basename(out),
                     full_path=out,
-                    original_filename=os.path.basename(
-                        getattr(self, "_input_video_path", "") or ""),
+                    original_filename=getattr(self, "_input_video_path", None),
                     hand_name=self._hand_var.get(),
                     min_cutoff=self._cutoff_var.get(),
                     beta=self._beta_var.get(),
@@ -857,6 +974,54 @@ class App(ctk.CTk):
         self._status_var.set(f"✓  Шлях оновлено для '{name}'")
         self._on_hand_changed(name)
 
+    def _delete_hand(self):
+        hand = self._hand_var.get()
+        if not hand:
+            messagebox.showerror("Помилка", "Спочатку оберіть руку")
+            return
+
+        ckpt_paths = [
+            r["checkpoint_path"]
+            for r in models_repo.get_all_for_hand(hand)
+            if r["checkpoint_path"] and os.path.isfile(r["checkpoint_path"])
+        ]
+
+        msg = f"Видалити '{hand}' з бази даних?\n\nБуде видалено: конфігурацію, всі моделі та епохи навчання."
+        if ckpt_paths:
+            msg += f"\n\nЗнайдено {len(ckpt_paths)} checkpoint-файл(ів) на диску."
+        answer = messagebox.askyesnocancel(
+            "Видалення руки", msg,
+            icon="warning",
+            detail="Так — видалити з БД\nНі — скасувати" if not ckpt_paths
+                   else "Так — видалити з БД та файли\nНі — видалити тільки з БД\nСкасувати — нічого не робити")
+        if answer is None:
+            return
+
+        delete_files = answer and bool(ckpt_paths)
+
+        try:
+            hands_repo.delete(hand)
+        except Exception as e:
+            messagebox.showerror("Помилка", f"Не вдалось видалити: {e}")
+            return
+
+        if delete_files:
+            failed = []
+            for path in ckpt_paths:
+                try:
+                    os.remove(path)
+                except Exception:
+                    failed.append(path)
+            if failed:
+                messagebox.showwarning(
+                    "Увага", f"Не вдалось видалити файли:\n" + "\n".join(failed))
+
+        hands = get_hands()
+        self._hand_menu.configure(values=hands)
+        self._hand_var.set(hands[0] if hands else "")
+        suffix = f" + {len(ckpt_paths) - len(failed if delete_files else [])} файл(ів)" if delete_files else ""
+        self._status_var.set(f"'{hand}' видалено{suffix}")
+
     def _add_hand(self):
         yml = filedialog.askopenfilename(
             title="Оберіть конфіг руки (.yml)",
@@ -873,6 +1038,32 @@ class App(ctk.CTk):
         assets_abs  = os.path.abspath(assets_src)
 
         try:
+            from retargeting import load_retargeting_config
+            load_retargeting_config(yml_abs, assets_abs)
+        except FileNotFoundError as e:
+            messagebox.showerror(
+                "Файл не знайдено",
+                f"{e}\n\nПеревірте що обрані YML і папка assets відповідають одній руці.")
+            return
+        except Exception as e:
+            messagebox.showerror("Помилка конфігу", str(e))
+            return
+
+        data_files = sorted(glob.glob(os.path.join(DATA_DIR, "kps_*.npz")))
+        if not data_files:
+            messagebox.showwarning(
+                "Дані відсутні",
+                f"Файли kps_*.npz не знайдено в {DATA_DIR}.\n"
+                "Спочатку зберіть дані через collect_data.py")
+            return
+
+        dlg_epochs = EpochsDialog(self, hand_name)
+        self.wait_window(dlg_epochs)
+        if dlg_epochs.result is None:
+            return
+        n_epochs = dlg_epochs.result
+
+        try:
             hands_repo.get_or_create(hand_name, yml_abs, assets_abs)
         except Exception as e:
             messagebox.showerror("Помилка", f"Не вдалось зареєструвати руку: {e}")
@@ -883,19 +1074,12 @@ class App(ctk.CTk):
         self._hand_var.set(hand_name)
 
         row = hands_repo.get_by_name(hand_name)
-        self._train(hand_name, row["yml_path"])
+        self._train(hand_name, row["yml_path"], n_epochs)
 
-    def _train(self, hand_name, config_path):
+    def _train(self, hand_name, config_path, n_epochs: int = 100):
         data_files = sorted(glob.glob(os.path.join(DATA_DIR, "kps_*.npz")))
-        if not data_files:
-            messagebox.showwarning(
-                "Дані відсутні",
-                f"Файли kps_*.npz не знайдено в {DATA_DIR}.\n"
-                "Спочатку зберіть дані через collect_data.py")
-            return
 
-        import time as _time
-        run_id = _time.strftime("%Y%m%d_%H%M%S")
+        run_id = time.strftime("%Y%m%d_%H%M%S")
         self._current_run_id = run_id
         hand_row   = hands_repo.get_by_name(hand_name)
         assets_path = hand_row["assets_path"] if hand_row else None
@@ -904,6 +1088,7 @@ class App(ctk.CTk):
                os.path.join(BASE_DIR, "mlp_selfsupervised", "train.py"),
                "--config", config_path,
                "--run-id", run_id,
+               "--epochs", str(n_epochs),
                "--data"] + data_files
         if assets_path:
             cmd += ["--assets-path", assets_path]

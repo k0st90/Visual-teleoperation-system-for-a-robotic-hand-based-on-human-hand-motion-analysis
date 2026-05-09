@@ -8,14 +8,12 @@ Usage (internal, called from app.py):
 """
 
 import argparse
-import sys
-import os
 
+import numpy as np
 import pybullet as pb
 import pybullet_data
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config_loader import load_retargeting_config
+from retargeting import load_retargeting_config
 
 HAND_BASE_POS = [0, 0, 0.35]
 
@@ -56,7 +54,6 @@ def main():
             yaw   = cam[8]
             pitch = cam[9]
             # compute real distance from view matrix
-            import numpy as np
             vm = np.array(cam[2]).reshape(4, 4, order='F')
             cam_pos = -vm[:3, :3].T @ vm[:3, 3]
             dist = float(np.linalg.norm(cam_pos - np.array(HAND_BASE_POS)))

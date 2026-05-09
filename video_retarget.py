@@ -20,10 +20,8 @@ import pybullet as pb
 import pybullet_data
 from scipy.spatial.transform import Rotation as sciR
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wilor_detector import WilorDetector
-from hand_retargeter import HandRetargeter
-from config_loader import load_retargeting_config
+from retargeting import HandRetargeter, load_retargeting_config
+from detection import WilorDetector
 from mlp_selfsupervised.infer import MLPRetargeter
 
 

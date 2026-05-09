@@ -49,32 +49,3 @@ class RetargeterMLP(nn.Module):
         qpos = torch.sigmoid(raw) * (self.joint_ub - self.joint_lb) + self.joint_lb
         return qpos
 
-    def predict(self, kps_np: np.ndarray) -> np.ndarray:
-        """Single-sample inference (no grad). kps_np: (21, 3)"""
-        self.eval()
-        with torch.no_grad():
-            x = torch.tensor(kps_np, dtype=torch.float32).unsqueeze(0)
-            qpos = self.forward(x)
-        return qpos.squeeze(0).cpu().numpy()
-
-    @staticmethod
-    def from_checkpoint(path: str, device: str = "cpu") -> "RetargeterMLP":
-        ckpt = torch.load(path, map_location=device)
-        model = RetargeterMLP(
-            n_doa=ckpt["n_doa"],
-            joint_lb=ckpt["joint_lb"],
-            joint_ub=ckpt["joint_ub"],
-            hidden=ckpt.get("hidden", 256),
-        )
-        model.load_state_dict(ckpt["state_dict"])
-        model.eval()
-        return model
-
-    def save_checkpoint(self, path: str):
-        torch.save({
-            "n_doa":       self.n_doa,
-            "joint_lb":    self.joint_lb.cpu().numpy(),
-            "joint_ub":    self.joint_ub.cpu().numpy(),
-            "hidden":      self.net[0].out_features,
-            "state_dict":  self.state_dict(),
-        }, path)

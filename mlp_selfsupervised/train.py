@@ -22,8 +22,10 @@ Usage:
 import argparse
 import glob
 import os
+import pathlib
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import torch
@@ -31,9 +33,9 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from retargeting import HandRetargeter, load_retargeting_config
 from mlp_selfsupervised.mlp_model import RetargeterMLP
-from hand_retargeter import HandRetargeter
-from utils.utils_mano import MANO_FINGERTIP_INDEX
+from utils.mano import MANO_FINGERTIP_INDEX
 
 
 
@@ -276,20 +278,17 @@ class SelfSupervisedLoss(nn.Module):
 # ─── training loop ────────────────────────────────────────────────────────────
 
 def train(args):
-    import time as _time
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device}")
 
     yml_path = args.config
-    import pathlib
     hand_name = pathlib.Path(args.config).stem
-    run_id    = args.run_id or _time.strftime("%Y%m%d_%H%M%S")
+    run_id    = args.run_id or time.strftime("%Y%m%d_%H%M%S")
     print(f"Loading retargeter: {yml_path}")
     retargeter = HandRetargeter(yml_path=yml_path, assets_path=args.assets_path)
     n_doa      = retargeter.robot_adaptor.doa
     joint_lb   = retargeter.optimizer.joint_limits[:, 0]
     joint_ub   = retargeter.optimizer.joint_limits[:, 1]
-    from config_loader import load_retargeting_config
     urdf_path  = load_retargeting_config(yml_path, args.assets_path)["urdf_path"]
 
     # all link names the optimizer uses (origin + task + wrist)
@@ -297,7 +296,6 @@ def train(args):
 
     # pinocchio frame names can differ from URDF link names (e.g. fixed-joint frames
     # are named after the joint, not the child link). Build remap: joint_name → child_link.
-    import xml.etree.ElementTree as ET
     root = ET.parse(urdf_path).getroot()
     urdf_link_names = {el.get("name") for el in root.iter("link")}
     link_name_remap = {

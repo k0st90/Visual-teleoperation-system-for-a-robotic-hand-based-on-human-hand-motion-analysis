@@ -1,9 +1,12 @@
 from database.connection import get_connection, get_cursor
-from database.repositories.hands import get_or_create
+from database.repositories.hands import get_by_name as get_hand_by_name
 
 
 def save(hand_name: str, run_id: str, checkpoint_path: str) -> int:
-    hand_id = get_or_create(hand_name, yml_path="", assets_path="")
+    row = get_hand_by_name(hand_name)
+    if row is None:
+        raise ValueError(f"Hand '{hand_name}' not found in DB")
+    hand_id = row["id"]
     with get_connection() as conn:
         with get_cursor(conn) as cur:
             cur.execute("""

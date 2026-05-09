@@ -1,6 +1,6 @@
 import os
 from database.connection import get_connection, get_cursor
-from database.repositories.hands import get_or_create as get_or_create_hand
+from database.repositories.hands import get_by_name as get_hand_by_name
 
 
 def add_original(filename: str, full_path: str, duration_sec: float = None) -> int:
@@ -9,8 +9,9 @@ def add_original(filename: str, full_path: str, duration_sec: float = None) -> i
             cur.execute("""
                 INSERT INTO original_videos (filename, full_path, duration_sec)
                 VALUES (%s, %s, %s)
-                ON CONFLICT (filename) DO UPDATE
-                    SET full_path = EXCLUDED.full_path
+                ON CONFLICT (full_path) DO UPDATE
+                    SET filename = EXCLUDED.filename,
+                        duration_sec = EXCLUDED.duration_sec
                 RETURNING id
             """, (filename, full_path, duration_sec))
             vid_id = cur.fetchone()["id"]
@@ -18,20 +19,20 @@ def add_original(filename: str, full_path: str, duration_sec: float = None) -> i
     return vid_id
 
 
-def get_original_by_filename(filename: str) -> dict | None:
+def get_original_by_path(full_path: str) -> dict | None:
     with get_connection() as conn:
         with get_cursor(conn) as cur:
             cur.execute(
-                "SELECT * FROM original_videos WHERE filename = %s",
-                (filename,)
+                "SELECT * FROM original_videos WHERE full_path = %s",
+                (full_path,)
             )
             return cur.fetchone()
 
 
-def delete_original(filename: str):
+def delete_original(full_path: str):
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM original_videos WHERE filename = %s", (filename,))
+            cur.execute("DELETE FROM original_videos WHERE full_path = %s", (full_path,))
         conn.commit()
 
 
@@ -42,14 +43,15 @@ def add_retargeted(filename: str, full_path: str,
                    cam_pitch: float = None, model_id: int = None) -> int:
     original_id = None
     if original_filename:
-        row = get_original_by_filename(original_filename)
+        row = get_original_by_path(original_filename)
         if row:
             original_id = row["id"]
 
     hand_id = None
     if hand_name:
         try:
-            hand_id = get_or_create_hand(hand_name, yml_path="", assets_path="")
+            row = get_hand_by_name(hand_name)
+            hand_id = row["id"] if row else None
         except Exception:
             pass
 
@@ -60,8 +62,8 @@ def add_retargeted(filename: str, full_path: str,
                     (filename, full_path, original_id, hand_id,
                      min_cutoff, beta, cam_distance, cam_yaw, cam_pitch, model_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (filename) DO UPDATE
-                    SET full_path = EXCLUDED.full_path
+                ON CONFLICT (full_path) DO UPDATE
+                    SET filename = EXCLUDED.filename
                 RETURNING id
             """, (filename, full_path, original_id, hand_id,
                   min_cutoff, beta, cam_distance, cam_yaw, cam_pitch, model_id))
@@ -70,10 +72,10 @@ def add_retargeted(filename: str, full_path: str,
     return vid_id
 
 
-def delete_retargeted(filename: str):
+def delete_retargeted(full_path: str):
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM retargeted_videos WHERE filename = %s", (filename,))
+            cur.execute("DELETE FROM retargeted_videos WHERE full_path = %s", (full_path,))
         conn.commit()
 
 

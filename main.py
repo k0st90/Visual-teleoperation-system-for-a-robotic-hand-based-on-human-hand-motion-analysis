@@ -1,14 +1,18 @@
 import argparse
+import pathlib
 import queue
 import threading
 import time
+
 import cv2
 import numpy as np
 import pybullet as pb
 import pybullet_data
 from scipy.spatial.transform import Rotation as sciR
 
-from hand_retargeter import HandRetargeter
+from retargeting import HandRetargeter, load_retargeting_config
+from detection import WilorDetector
+from mlp_selfsupervised.infer import MLPRetargeter
 
 
 HAND_BASE_POS = [0, 0, 0.1]
@@ -95,16 +99,11 @@ def main():
     parser.add_argument("--beta",         type=float, default=0.02)
     args = parser.parse_args()
 
-    import pathlib
-    from config_loader import load_retargeting_config
     hand_name = pathlib.Path(args.config).stem
     urdf_path  = load_retargeting_config(args.config, args.assets_path)["urdf_path"]
     print(f"Config: {args.config}  |  URDF: {urdf_path}")
 
     hand_id = setup_pybullet(urdf_path, args.cam_distance, args.cam_yaw, args.cam_pitch)
-
-    from wilor_detector import WilorDetector
-    from mlp_selfsupervised.infer import MLPRetargeter
 
     detector = WilorDetector(hand_type="Right")
     retargeter = HandRetargeter(yml_path=args.config, assets_path=args.assets_path)
@@ -139,7 +138,6 @@ def main():
     # Fixed rotation: WiLoR camera frame → PyBullet world frame
     R_CAM2WORLD = sciR.from_euler("x", -90, degrees=True).as_matrix()
 
-    frame_idx = 0
     t_prev = time.time()
     wrist_quat_smooth = np.array([0.0, 0.0, 0.0, 1.0])
     WRIST_EMA = 0.15
@@ -181,7 +179,6 @@ def main():
 
         pb.stepSimulation()
 
-        frame_idx += 1
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             break

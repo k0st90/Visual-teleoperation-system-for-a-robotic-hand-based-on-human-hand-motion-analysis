@@ -59,6 +59,8 @@ class OneEuroFilter:
 class MLPRetargeter:
     def __init__(self, checkpoint_path: str, device: str = "cpu",
                  min_cutoff: float = 0.3, beta: float = 0.02):
+        if not os.path.isfile(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
         ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
         self.model = RetargeterMLP(
             n_doa=ckpt["n_doa"],
