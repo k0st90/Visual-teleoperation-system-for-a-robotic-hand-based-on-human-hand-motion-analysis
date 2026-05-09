@@ -39,8 +39,13 @@ def parse_args():
     p.add_argument("--config",     default="configs/leap_hand_right.yml")
     p.add_argument("--checkpoint", default=None)
     p.add_argument("--out",        default=None, help="Output video path")
-    p.add_argument("--fps",        type=float, default=None,
+    p.add_argument("--fps",          type=float, default=None,
                    help="Output FPS (default: same as input)")
+    p.add_argument("--cam-distance", type=float, default=1.1)
+    p.add_argument("--cam-yaw",      type=float, default=45.0)
+    p.add_argument("--cam-pitch",    type=float, default=-30.0)
+    p.add_argument("--min-cutoff",   type=float, default=0.3)
+    p.add_argument("--beta",         type=float, default=0.02)
     return p.parse_args()
 
 
@@ -116,7 +121,7 @@ def main():
 
     detector  = WilorDetector(hand_type="Right")
     retargeter = HandRetargeter(yml_path=args.config)
-    mlp       = MLPRetargeter(ckpt)
+    mlp       = MLPRetargeter(ckpt, min_cutoff=args.min_cutoff, beta=args.beta)
 
     hand_id = setup_pybullet(urdf_path)
     joint_indices, pb_names = get_joint_indices(hand_id)
@@ -126,8 +131,10 @@ def main():
 
     view_matrix = pb.computeViewMatrixFromYawPitchRoll(
         cameraTargetPosition=HAND_BASE_POS,
-        distance=1.1,
-        yaw=45, pitch=-30, roll=0,
+        distance=args.cam_distance,
+        yaw=args.cam_yaw,
+        pitch=args.cam_pitch,
+        roll=0,
         upAxisIndex=2,
     )
     proj_matrix = pb.computeProjectionMatrixFOV(

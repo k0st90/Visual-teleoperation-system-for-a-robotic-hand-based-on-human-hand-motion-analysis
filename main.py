@@ -15,7 +15,7 @@ HAND_BASE_POS = [0, 0, 0.1]
 HAND_BASE_ORI = pb.getQuaternionFromEuler([0, 0, 0])
 
 
-def setup_pybullet(urdf_path):
+def setup_pybullet(urdf_path, cam_distance=0.4, cam_yaw=45, cam_pitch=-30):
     pb.connect(pb.GUI)
     pb.setAdditionalSearchPath(pybullet_data.getDataPath())
     pb.setGravity(0, 0, -9.81)
@@ -29,9 +29,9 @@ def setup_pybullet(urdf_path):
     )
 
     pb.resetDebugVisualizerCamera(
-        cameraDistance=0.4,
-        cameraYaw=45,
-        cameraPitch=-30,
+        cameraDistance=cam_distance,
+        cameraYaw=cam_yaw,
+        cameraPitch=cam_pitch,
         cameraTargetPosition=HAND_BASE_POS,
     )
 
@@ -87,6 +87,11 @@ def main():
                         help="Path to retargeting config YAML")
     parser.add_argument("--checkpoint", default=None,
                         help="MLP checkpoint path (default: checkpoints/mlp_ss_<config_stem>_best.pt)")
+    parser.add_argument("--cam-distance", type=float, default=0.4)
+    parser.add_argument("--cam-yaw",      type=float, default=45.0)
+    parser.add_argument("--cam-pitch",    type=float, default=-30.0)
+    parser.add_argument("--min-cutoff",   type=float, default=0.3)
+    parser.add_argument("--beta",         type=float, default=0.02)
     args = parser.parse_args()
 
     import pathlib
@@ -95,7 +100,7 @@ def main():
     urdf_path  = load_retargeting_config(args.config)["urdf_path"]
     print(f"Config: {args.config}  |  URDF: {urdf_path}")
 
-    hand_id = setup_pybullet(urdf_path)
+    hand_id = setup_pybullet(urdf_path, args.cam_distance, args.cam_yaw, args.cam_pitch)
 
     from wilor_detector import WilorDetector
     from mlp_selfsupervised.infer import MLPRetargeter
@@ -104,7 +109,7 @@ def main():
     retargeter = HandRetargeter(yml_path=args.config)
 
     ckpt = args.checkpoint or f"checkpoints/mlp_ss_{hand_name}_best.pt"
-    mlp = MLPRetargeter(ckpt)
+    mlp = MLPRetargeter(ckpt, min_cutoff=args.min_cutoff, beta=args.beta)
     print(f"Checkpoint: {ckpt}")
 
     joint_indices, pb_names = get_joint_indices(hand_id)
