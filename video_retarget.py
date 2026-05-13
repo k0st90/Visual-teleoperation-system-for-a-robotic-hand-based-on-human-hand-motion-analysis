@@ -40,7 +40,7 @@ def parse_args():
     p.add_argument("--fps",          type=float, default=None,
                    help="Output FPS (default: same as input)")
     p.add_argument("--cam-distance",  type=float, default=1.1)
-    p.add_argument("--cam-yaw",       type=float, default=45.0)
+    p.add_argument("--cam-yaw",       type=float, default=0.0)
     p.add_argument("--cam-pitch",     type=float, default=-30.0)
     p.add_argument("--assets-path",   type=str,   default=None)
     p.add_argument("--min-cutoff",   type=float, default=0.3)
@@ -118,7 +118,7 @@ def main():
     print(f"Checkpoint: {ckpt}")
     print(f"Input:      {args.input}")
 
-    detector  = WilorDetector(hand_type="Right")
+    detector  = WilorDetector()
     retargeter = HandRetargeter(yml_path=args.config, assets_path=args.assets_path)
     mlp       = MLPRetargeter(ckpt, min_cutoff=args.min_cutoff, beta=args.beta)
 

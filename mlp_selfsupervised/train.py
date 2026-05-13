@@ -145,10 +145,10 @@ class SelfSupervisedLoss(nn.Module):
         self.device     = device
         self.huber      = nn.SmoothL1Loss(beta=retargeter.huber_delta, reduction="none")
 
-        opt = retargeter.optimizer
+        setup = retargeter.setup
         # indices into FK output (link_names list) for origin and task links
-        self.origin_idx = opt.origin_links_idx.to(device)  # (n_pairs,)
-        self.task_idx   = opt.task_links_idx.to(device)    # (n_pairs,)
+        self.origin_idx = setup.origin_links_idx.to(device)  # (n_pairs,)
+        self.task_idx   = setup.task_links_idx.to(device)    # (n_pairs,)
 
         # joint pos regularisation weights (ABD joints)
         self.wjpos = torch.tensor(
@@ -287,12 +287,12 @@ def train(args):
     print(f"Loading retargeter: {yml_path}")
     retargeter = HandRetargeter(yml_path=yml_path, assets_path=args.assets_path)
     n_doa      = retargeter.robot_adaptor.doa
-    joint_lb   = retargeter.optimizer.joint_limits[:, 0]
-    joint_ub   = retargeter.optimizer.joint_limits[:, 1]
+    joint_lb   = retargeter.setup.joint_limits[:, 0]
+    joint_ub   = retargeter.setup.joint_limits[:, 1]
     urdf_path  = load_retargeting_config(yml_path, args.assets_path)["urdf_path"]
 
-    # all link names the optimizer uses (origin + task + wrist)
-    link_names = retargeter.optimizer.computed_links_name
+    # all link names used in the loss function (origin + task + wrist)
+    link_names = retargeter.setup.computed_links_name
 
     # pinocchio frame names can differ from URDF link names (e.g. fixed-joint frames
     # are named after the joint, not the child link). Build remap: joint_name → child_link.

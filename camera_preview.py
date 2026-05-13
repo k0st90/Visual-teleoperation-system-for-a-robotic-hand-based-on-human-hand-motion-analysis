@@ -22,7 +22,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
     p.add_argument("--cam-distance", type=float, default=0.7)
-    p.add_argument("--cam-yaw",      type=float, default=45.0)
+    p.add_argument("--cam-yaw",      type=float, default=0.0)
     p.add_argument("--cam-pitch",    type=float, default=-30.0)
     p.add_argument("--out",          default=None, help="File to write camera params")
     p.add_argument("--assets-path",  default=None)

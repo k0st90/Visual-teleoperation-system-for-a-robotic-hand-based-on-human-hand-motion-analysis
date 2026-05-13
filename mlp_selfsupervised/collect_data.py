@@ -40,7 +40,7 @@ def main():
         args.out = f"data/kps_{ts}.npz"
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 
-    detector = WilorDetector(hand_type="Right")
+    detector = WilorDetector()
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():

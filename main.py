@@ -91,8 +91,8 @@ def main():
                         help="Path to retargeting config YAML")
     parser.add_argument("--checkpoint", default=None,
                         help="MLP checkpoint path (default: checkpoints/mlp_ss_<config_stem>_best.pt)")
-    parser.add_argument("--cam-distance",  type=float, default=0.4)
-    parser.add_argument("--cam-yaw",       type=float, default=45.0)
+    parser.add_argument("--cam-distance",  type=float, default=0.6)
+    parser.add_argument("--cam-yaw",       type=float, default=0.0)
     parser.add_argument("--cam-pitch",     type=float, default=-30.0)
     parser.add_argument("--assets-path",   type=str,   default=None)
     parser.add_argument("--min-cutoff",   type=float, default=0.3)
@@ -105,7 +105,7 @@ def main():
 
     hand_id = setup_pybullet(urdf_path, args.cam_distance, args.cam_yaw, args.cam_pitch)
 
-    detector = WilorDetector(hand_type="Right")
+    detector = WilorDetector()
     retargeter = HandRetargeter(yml_path=args.config, assets_path=args.assets_path)
 
     ckpt = args.checkpoint or f"checkpoints/mlp_ss_{hand_name}_best.pt"

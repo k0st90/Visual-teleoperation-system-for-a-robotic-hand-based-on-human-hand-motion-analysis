@@ -34,6 +34,10 @@ RETARGETED_DIR= os.path.join(VIDEO_DIR, "retargeted")
 CKPT_DIR      = os.path.join(BASE_DIR, "checkpoints")
 DATA_DIR      = os.path.join(BASE_DIR, "data")
 
+_RT_CAM_DISTANCE = 0.6
+_RT_CAM_YAW      = 0.0
+_RT_CAM_PITCH    = -30.0
+
 for d in (RETARGETED_DIR, DATA_DIR):
     os.makedirs(d, exist_ok=True)
 
@@ -273,7 +277,7 @@ class App(ctk.CTk):
 
         # Camera position (video mode only)
         self._cam_distance = 0.7
-        self._cam_yaw      = 45.0
+        self._cam_yaw      = 0.0
         self._cam_pitch    = -30.0
 
         self._cam_frame = ctk.CTkFrame(sb, fg_color="transparent")
@@ -811,9 +815,9 @@ class App(ctk.CTk):
         if self._mode.get() == "camera":
             cmd = [sys.executable, os.path.join(BASE_DIR, "main.py"),
                    "--config",       config,
-                   "--cam-distance", dist,
-                   "--cam-yaw",      yaw,
-                   "--cam-pitch",    pitch,
+                   "--cam-distance", str(_RT_CAM_DISTANCE),
+                   "--cam-yaw",      str(_RT_CAM_YAW),
+                   "--cam-pitch",    str(_RT_CAM_PITCH),
                    "--min-cutoff",   cutoff,
                    "--beta",         beta]
             if ckpt:

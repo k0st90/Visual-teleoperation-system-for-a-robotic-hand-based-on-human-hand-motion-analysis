@@ -1,12 +1,15 @@
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import sqlite3
+import os
 
-DSN = "host=localhost port=5432 dbname=hand_teleop user=teleop password=teleop123"
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hand_teleop.db")
 
 
 def get_connection():
-    return psycopg2.connect(DSN)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 
 def get_cursor(conn):
-    return conn.cursor(cursor_factory=RealDictCursor)
+    return conn.cursor()
