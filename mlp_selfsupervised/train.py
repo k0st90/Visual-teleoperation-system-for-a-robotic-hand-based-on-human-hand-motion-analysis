@@ -34,7 +34,7 @@ from torch.utils.data import Dataset, DataLoader, random_split
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from retargeting import HandRetargeter, load_retargeting_config
-from mlp_selfsupervised.mlp_model import RetargeterMLP
+from mlp_selfsupervised.mlp_model import MLPModel
 from utils.mano import MANO_FINGERTIP_INDEX
 
 
@@ -286,7 +286,7 @@ def train(args):
     run_id    = args.run_id or time.strftime("%Y%m%d_%H%M%S")
     print(f"Loading retargeter: {yml_path}")
     retargeter = HandRetargeter(yml_path=yml_path, assets_path=args.assets_path)
-    n_doa      = retargeter.robot_adaptor.doa
+    n_doa      = retargeter.robot_model.doa
     joint_lb   = retargeter.setup.joint_limits[:, 0]
     joint_ub   = retargeter.setup.joint_limits[:, 1]
     urdf_path  = load_retargeting_config(yml_path, args.assets_path)["urdf_path"]
@@ -335,7 +335,7 @@ def train(args):
     print(f"Train: {n_train}  Val: {n_val}")
 
     # model
-    model = RetargeterMLP(n_doa=n_doa, joint_lb=joint_lb, joint_ub=joint_ub,
+    model = MLPModel(n_doa=n_doa, joint_lb=joint_lb, joint_ub=joint_ub,
                           hidden=args.hidden).to(device)
     print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
 

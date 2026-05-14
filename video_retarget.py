@@ -22,7 +22,7 @@ from scipy.spatial.transform import Rotation as sciR
 
 from retargeting import HandRetargeter, load_retargeting_config
 from detection import WilorDetector
-from mlp_selfsupervised.infer import MLPRetargeter
+from mlp_selfsupervised.infer import MLPRunner
 
 
 HAND_BASE_POS = [0, 0, 0.35]
@@ -120,7 +120,7 @@ def main():
 
     detector  = WilorDetector()
     retargeter = HandRetargeter(yml_path=args.config, assets_path=args.assets_path)
-    mlp       = MLPRetargeter(ckpt, min_cutoff=args.min_cutoff, beta=args.beta)
+    mlp       = MLPRunner(ckpt, min_cutoff=args.min_cutoff, beta=args.beta)
 
     hand_id = setup_pybullet(urdf_path)
     joint_indices, pb_names = get_joint_indices(hand_id)
@@ -154,7 +154,6 @@ def main():
     fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
     writer   = cv2.VideoWriter(out_path, fourcc, out_fps, (RENDER_W * 2, RENDER_H))
 
-    cam_K = np.array([[554.0, 0, 320.0], [0, 554.0, 240.0], [0, 0, 1.0]])
 
     wrist_quat_smooth = np.array([0.0, 0.0, 0.0, 1.0])
     kps_smooth = None
@@ -178,7 +177,7 @@ def main():
                 break
             src_frame, bgr_orig = item
             rgb = cv2.cvtColor(src_frame, cv2.COLOR_BGR2RGB)
-            det = detector.detect(rgb, cam_K)
+            det = detector.detect(rgb)
             result_q.put((src_frame, bgr_orig, det))
 
     t = threading.Thread(target=detector_thread, daemon=True)

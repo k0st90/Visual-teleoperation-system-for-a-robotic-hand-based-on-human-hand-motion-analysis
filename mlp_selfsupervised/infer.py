@@ -2,8 +2,8 @@
 MLP inference wrapper — drop-in replacement for HandRetargeter.retarget().
 
 Usage in main.py:
-    from mlp_selfsupervised.infer import MLPRetargeter
-    retargeter = MLPRetargeter("checkpoints/mlp_ss_leap_best.pt")
+    from mlp_selfsupervised.infer import MLPRunner
+    retargeter = MLPRunner("checkpoints/mlp_ss_leap_best.pt")
     qpos = retargeter.retarget(joint_pos)   # same API as HandRetargeter
 """
 
@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from mlp_selfsupervised.mlp_model import RetargeterMLP
+from mlp_selfsupervised.mlp_model import MLPModel
 
 
 class OneEuroFilter:
@@ -56,13 +56,13 @@ class OneEuroFilter:
         return 1.0 / (1.0 + tau / dt)
 
 
-class MLPRetargeter:
+class MLPRunner:
     def __init__(self, checkpoint_path: str, device: str = "cpu",
                  min_cutoff: float = 0.3, beta: float = 0.02):
         if not os.path.isfile(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
         ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
-        self.model = RetargeterMLP(
+        self.model = MLPModel(
             n_doa=ckpt["n_doa"],
             joint_lb=ckpt["joint_lb"],
             joint_ub=ckpt["joint_ub"],
@@ -74,7 +74,7 @@ class MLPRetargeter:
         self.kps_mean = ckpt.get("kps_mean", None)
         self.kps_std  = ckpt.get("kps_std",  None)
         self.filter   = OneEuroFilter(min_cutoff=min_cutoff, beta=beta)
-        print(f"MLPRetargeter loaded: {checkpoint_path}  "
+        print(f"MLPRunner loaded: {checkpoint_path}  "
               f"OneEuroFilter(min_cutoff={min_cutoff}, beta={beta})")
 
     def retarget(self, hand_kps_in_wrist: np.ndarray) -> np.ndarray:

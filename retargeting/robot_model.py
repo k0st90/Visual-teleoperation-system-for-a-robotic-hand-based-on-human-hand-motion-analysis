@@ -1,114 +1,50 @@
-from typing import List, Optional
-
+from typing import List
 import os
-
 import numpy as np
 import pinocchio as pin
 
 
-class RobotPinocchio:
-    """
-    This class does not take mimic joint into consideration.
-    All joint orders used in this class is in the format of pinocchio.
-    """
-
-    def __init__(self, robot_file_path: str):
+class RobotModel:
+    def __init__(
+        self,
+        robot_file_path: str,
+        actuated_joints_name: List[str],
+        touch_joints_name: List[str] = None,
+    ):
         if not os.path.isfile(robot_file_path):
             raise FileNotFoundError(f"URDF not found: {robot_file_path}")
-        self.model: pin.Model = pin.buildModelFromUrdf(robot_file_path)
-        self.data: pin.Data = self.model.createData()
 
-    @property
-    def joint_names(self) -> List[str]:
-        return list(self.model.names[1:])  # exclude the first 'universe'
+        touch_joints_name = touch_joints_name or []
 
-    @property
-    def dof_joint_names(self) -> List[str]:
-        nqs = self.model.nqs
-        return [name for i, name in enumerate(self.model.names) if nqs[i] > 0]
+        self._model = pin.buildModelFromUrdf(robot_file_path)
+        self._data  = self._model.createData()
+
+        _dof_names = self._dof_joint_names()
+        if len(actuated_joints_name) + len(touch_joints_name) != self.dof:
+            raise NotImplementedError("No support for coupled joints.")
+
+        self.actuated_joints_name = actuated_joints_name
+        self._actuated_idx = [_dof_names.index(n) for n in actuated_joints_name]
+
+    def _dof_joint_names(self) -> List[str]:
+        nqs = self._model.nqs
+        return [name for i, name in enumerate(self._model.names) if nqs[i] > 0]
 
     @property
     def dof(self) -> int:
-        return self.model.nq
+        return self._model.nq
+
+    @property
+    def doa(self) -> int:
+        return len(self.actuated_joints_name)
 
     @property
     def frame_names(self) -> List[str]:
-        frame_names = []
-        for i, frame in enumerate(self.model.frames):
-            frame_names.append(frame.name)
-        return frame_names
+        return [frame.name for frame in self._model.frames]
 
     @property
-    def joint_limits(self):
-        lower = self.model.lowerPositionLimit
-        upper = self.model.upperPositionLimit
+    def joint_limits(self) -> np.ndarray:
+        lower = self._model.lowerPositionLimit
+        upper = self._model.upperPositionLimit
         return np.stack([lower, upper], axis=1)
 
-    def get_joint_index(self, name: str):
-        return self.dof_joint_names.index(name)
-
-    def get_frame_index(self, name: str):
-        if name not in self.frame_names:
-            raise ValueError(f"{name} is not a frame name. Valid link names: \n{self.frame_names}")
-        return self.model.getFrameId(name)
-
-    def get_frames_index(self, names: List[str]):
-        return [self.get_frame_index(name) for name in names]
-
-    def check_joint_dim(self, q):
-        assert len(q) == self.dof
-
-    def compute_forward_kinematics(self, qpos: np.ndarray, qvel: Optional[np.ndarray] = None):
-        """
-        Update forward kinematics of joints and frames.
-        """
-        self.check_joint_dim(qpos)
-        if qvel is None:
-            pin.framesForwardKinematics(self.model, self.data, qpos)
-        else:
-            self.check_joint_dim(qvel)
-            pin.forwardKinematics(self.model, self.data, qpos, qvel)  # This only updates joint data
-            pin.updateFramePlacements(self.model, self.data)  # Update frame data
-
-    def compute_jacobians(self, qpos: np.ndarray):
-        self.check_joint_dim(qpos)
-        pin.computeJointJacobians(self.model, self.data, qpos)  # call FK internally
-        pin.updateFramePlacements(self.model, self.data)
-
-    def get_frame_pose(self, frame_name: str, qpos: Optional[np.ndarray] = None) -> np.ndarray:
-        """
-        Args:
-            frame_name:
-            qpos: joint position (DoF)
-        """
-        if qpos is not None:
-            self.compute_forward_kinematics(qpos)
-        pose = self.data.oMf[self.get_frame_index(frame_name)]
-        return pose.homogeneous
-
-    def get_frame_space_jacobian(self, frame_name: str, qpos: Optional[np.ndarray] = None) -> np.ndarray:
-        frame_id = self.get_frame_index(frame_name)
-        reference_frame = pin.LOCAL_WORLD_ALIGNED
-        if qpos is not None:
-            self.check_joint_dim(qpos)
-            jaco = pin.computeFrameJacobian(
-                self.model,
-                self.data,
-                q=qpos,
-                frame_id=frame_id,
-                reference_frame=reference_frame,
-            )
-        else:
-            jaco = pin.getFrameJacobian(
-                self.model,
-                self.data,
-                frame_id=frame_id,
-                reference_frame=reference_frame,
-            )
-        return jaco
-
-
-if __name__ == "__main__":
-    robot = RobotPinocchio(robot_file_path="assets/leap_hand/leap_hand_right.urdf")
-    print("DOF:", robot.dof)
-    print("Frames:", robot.frame_names)

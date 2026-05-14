@@ -36,7 +36,7 @@ class WilorDetector:
             cv2.circle(image, pt, 4, color, -1)
         return image
 
-    def detect(self, rgb: np.ndarray, cam_K=None, input_size=(320, 240)) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def detect(self, rgb: np.ndarray, input_size=(320, 240)) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Args:
             input_size: (width, height) to resize frame before WiLoR inference.

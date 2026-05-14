@@ -1,7 +1,6 @@
 import numpy as np
 
-from .robot_model import RobotPinocchio
-from .robot_adaptor import RobotAdaptor
+from .robot_model import RobotModel
 from .retargeting_setup import RetargetingSetup
 from .config_loader import load_retargeting_config
 
@@ -61,9 +60,8 @@ class HandRetargeter:
         self.wjpos         = weights_joint_pos
         self.huber_delta   = 0.02
 
-        robot_model = RobotPinocchio(robot_file_path=urdf_path)
-        self.robot_adaptor = RobotAdaptor(
-            robot_model=robot_model,
+        self.robot_model = RobotModel(
+            robot_file_path=urdf_path,
             actuated_joints_name=actuated_joints_name,
             touch_joints_name=touch_joints_name,
         )
@@ -75,7 +73,7 @@ class HandRetargeter:
         }
 
         self.setup = RetargetingSetup(
-            robot_adaptor=self.robot_adaptor,
+            robot_model=self.robot_model,
             targets=targets,
         )
 

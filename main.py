@@ -12,7 +12,7 @@ from scipy.spatial.transform import Rotation as sciR
 
 from retargeting import HandRetargeter, load_retargeting_config
 from detection import WilorDetector
-from mlp_selfsupervised.infer import MLPRetargeter
+from mlp_selfsupervised.infer import MLPRunner
 
 
 HAND_BASE_POS = [0, 0, 0.1]
@@ -70,13 +70,13 @@ def apply_qpos(hand_id, joint_indices, qpos, mapping):
         pb.resetJointState(hand_id, joint_idx, qpos_pb[i])
 
 
-def detection_loop(detector, cap, cam_K, det_queue, stop_event):
+def detection_loop(detector, cap, det_queue, stop_event):
     while not stop_event.is_set():
         ret, bgr = cap.read()
         if not ret:
             continue
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        num_box, hand_kps, keypoint_2d, wrist_pose_in_cam, wrist_rot = detector.detect(rgb, cam_K)
+        num_box, hand_kps, keypoint_2d, wrist_pose_in_cam, wrist_rot = detector.detect(rgb)
         result = (bgr, hand_kps, keypoint_2d, wrist_pose_in_cam, wrist_rot)
         try:
             det_queue.get_nowait()
@@ -109,7 +109,7 @@ def main():
     retargeter = HandRetargeter(yml_path=args.config, assets_path=args.assets_path)
 
     ckpt = args.checkpoint or f"checkpoints/mlp_ss_{hand_name}_best.pt"
-    mlp = MLPRetargeter(ckpt, min_cutoff=args.min_cutoff, beta=args.beta)
+    mlp = MLPRunner(ckpt, min_cutoff=args.min_cutoff, beta=args.beta)
     print(f"Checkpoint: {ckpt}")
 
     joint_indices, pb_names = get_joint_indices(hand_id)
@@ -120,9 +120,6 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    fx = 554.0
-    cam_K = np.array([[fx, 0, 320.0], [0, fx, 240.0], [0, 0, 1.0]])
-
     if not cap.isOpened():
         print("Cannot open camera")
         return
@@ -130,7 +127,7 @@ def main():
     det_queue = queue.Queue(maxsize=1)
     stop_event = threading.Event()
     det_thread = threading.Thread(target=detection_loop,
-                                  args=(detector, cap, cam_K, det_queue, stop_event),
+                                  args=(detector, cap, det_queue, stop_event),
                                   daemon=True)
     det_thread.start()
     print("Running. Press Q to quit.")

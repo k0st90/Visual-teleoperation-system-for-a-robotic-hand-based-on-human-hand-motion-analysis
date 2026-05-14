@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 
 
-class RetargeterMLP(nn.Module):
+class MLPModel(nn.Module):
     """
     63 → 256 → 256 → n_doa
     LayerNorm + ReLU hidden layers.
