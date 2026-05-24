@@ -313,7 +313,7 @@ class App(ctk.CTk):
                 command=lambda v, l=lbl: l.configure(text=f"{float(v):.2f}")
             ).pack(side="left", fill="x", expand=True, padx=4)
 
-        # ── Група 1: Запуск ───────────────────────────────────────────────────
+        # ── Group 1: Controls ─────────────────────────────────────────────────
         ctk.CTkFrame(sb, height=1, fg_color="gray30").pack(fill="x", padx=16, pady=(12, 6))
         ctk.CTkLabel(sb, text="КЕРУВАННЯ", font=ctk.CTkFont(size=10, weight="bold"),
                      text_color="gray50", anchor="w").pack(fill="x", padx=18, pady=(0, 4))
@@ -335,7 +335,7 @@ class App(ctk.CTk):
         right.grid_rowconfigure(3, weight=1)
         right.grid_columnconfigure(0, weight=1)
 
-        # row=0  Галерея відео header ──────────────────────────────────────────
+        # row=0  Video gallery header ───────────────────────────────────────────
         orig_hdr = ctk.CTkFrame(right, fg_color="transparent")
         orig_hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 4))
         ctk.CTkLabel(orig_hdr, text="Галерея відео",
@@ -368,7 +368,7 @@ class App(ctk.CTk):
         ctk.CTkFrame(right, height=1, fg_color="gray30").grid(
             row=5, column=0, sticky="ew", padx=16, pady=(6, 0))
 
-        # row=8  ІНСТРУМЕНТИ ───────────────────────────────────────────────────
+        # row=8  Tools ─────────────────────────────────────────────────────────
         tools_hdr = ctk.CTkFrame(right, fg_color="transparent")
         tools_hdr.grid(row=6, column=0, sticky="ew", padx=16, pady=(6, 6))
         ctk.CTkLabel(tools_hdr, text="ІНСТРУМЕНТИ",
@@ -522,7 +522,7 @@ class App(ctk.CTk):
                             line=dict(color=color, width=1.5)),
                 hoverinfo="skip", showlegend=False), row=1, col=1)
 
-            # підграфіки — дублюються в обох групах; hover тільки в train-копії
+            # subplots — duplicated in both legend groups; hover only in train copy
             for y_data, row_n in [(links_l, 2), (jpos_l, 3), (lr_l, 4), (time_l, 5)]:
                 fig.add_trace(go.Scatter(x=xs, y=y_data,
                     legendgroup=lg_t, showlegend=False,

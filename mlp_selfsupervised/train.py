@@ -1,17 +1,14 @@
 """
 Self-supervised MLP retargeter training.
 
-Підхід з оригінальної статті arXiv:2202.10448:
-- Лейбли НЕ потрібні (немає пар keypoints→qpos від оптимізатора)
-- Loss = геометрична відстань між векторами пальців людини і робота
-- FK диференційований через pytorch_kinematics → градієнт проходить
-  від loss → link positions → qpos → ваги MLP
+No labels required — loss is the geometric distance between human and robot finger vectors.
+FK is differentiable via pytorch_kinematics: gradient flows from loss → link positions → qpos → MLP weights.
 
-Loss (з Mingrui retarget_optimizer.py, VectorWristJointOptimizer):
-    total = links_vec_cost    ← головний: вектори пальців збігаються
-          + joint_pos_cost    ← регуляризація: ABD суглоби біля нуля
+Loss:
+    total = links_vec_cost    ← main: finger vectors align
+          + joint_pos_cost    ← regularisation: ABD joints stay near zero
 
-Встановити залежність:
+Install dependency:
     pip install pytorch-kinematics
 
 Usage:
@@ -124,17 +121,17 @@ class KeypointsDataset(Dataset):
         )
 
 
-# ─── self-supervised loss (from Mingrui VectorWristJointOptimizer) ────────────
+# ─── self-supervised loss ─────────────────────────────────────────────────────
 
 class SelfSupervisedLoss(nn.Module):
     """
     links_vec_cost + joint_pos_cost
 
-    links_vec_cost: Huber loss між векторами пальців робота і людини
+    links_vec_cost: Huber loss between robot and human finger vectors
         robot_vec  = FK(qpos)[task_link] - FK(qpos)[origin_link]
         human_vec  = hand_kps[fingertip]  - hand_kps[wrist]   (+ pinch + orient)
 
-    joint_pos_cost: Huber loss що тримає ABD суглоби біля нуля
+    joint_pos_cost: Huber loss keeping ABD joints near zero
         = huber(weights_joint_pos * qpos, 0)
     """
 
