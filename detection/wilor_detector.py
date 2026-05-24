@@ -17,11 +17,15 @@ HAND_CONNECTIONS = [
 class WilorDetector:
     """Drop-in replacement for SingleHandDetector using WiLoR-mini."""
 
-    def __init__(self, is_right_val: float = 1.0):
+    def __init__(self, is_right_val: float = 1.0, device: str = None):
         self.is_right_val = is_right_val
-        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        print(f"WilorDetector: using {device}")
-        self.pipe = WiLorHandPose3dEstimationPipeline(device=device, dtype=torch.float16, verbose=False)
+        if device is None:
+            _device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        else:
+            _device = torch.device(device)
+        dtype = torch.float16 if _device.type == "cuda" else torch.float32
+        print(f"WilorDetector: using {_device} ({dtype})")
+        self.pipe = WiLorHandPose3dEstimationPipeline(device=_device, dtype=dtype, verbose=False)
 
     @staticmethod
     def draw_skeleton_on_image(image: np.ndarray, keypoint_2d: np.ndarray, style="white") -> np.ndarray:

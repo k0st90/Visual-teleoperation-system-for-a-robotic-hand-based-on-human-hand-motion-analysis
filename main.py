@@ -2,7 +2,6 @@ import argparse
 import pathlib
 import queue
 import threading
-import time
 
 import cv2
 import numpy as np
@@ -135,11 +134,9 @@ def main():
     # Fixed rotation: WiLoR camera frame → PyBullet world frame
     R_CAM2WORLD = sciR.from_euler("x", -90, degrees=True).as_matrix()
 
-    t_prev = time.time()
     wrist_quat_smooth = np.array([0.0, 0.0, 0.0, 1.0])
     WRIST_EMA = 0.15
     last_result = None
-
     while True:
         try:
             last_result = det_queue.get_nowait()
@@ -167,11 +164,6 @@ def main():
         else:
             annotated = np.zeros((480, 640, 3), dtype=np.uint8)
 
-        t_now = time.time()
-        fps = 1.0 / max(t_now - t_prev, 1e-6)
-        t_prev = t_now
-        cv2.putText(annotated, f"FPS: {fps:.1f}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         cv2.imshow("Hand Tracking", annotated)
 
         pb.stepSimulation()
