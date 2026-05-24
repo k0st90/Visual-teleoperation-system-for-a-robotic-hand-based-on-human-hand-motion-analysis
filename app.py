@@ -469,13 +469,16 @@ class App(ctk.CTk):
         colors = ["#4da6ff", "#ff6b6b", "#51cf66", "#ffd43b",
                   "#cc5de8", "#ff922b", "#20c997", "#f06595"]
 
+        latest_run_id = runs[-1]["run_id"] if runs else None
+
         for i, run in enumerate(runs):
             epochs = epochs_repo.get_for_run(run["run_id"])
             if not epochs:
                 continue
 
             color     = colors[i % len(colors)]
-            run_label = run["run_id"]
+            is_latest = run["run_id"] == latest_run_id
+            run_label = f"{run['run_id']} (поточне)" if is_latest else run["run_id"]
             xs        = [e["epoch"]           for e in epochs]
             train_l   = [e["train_loss"]       for e in epochs]
             val_l     = [e["val_loss"]         for e in epochs]
