@@ -1061,7 +1061,7 @@ class App(ctk.CTk):
             messagebox.showwarning(
                 "Дані відсутні",
                 f"Файли kps_*.npz не знайдено в {DATA_DIR}.\n"
-                "Спочатку зберіть дані через collect_data.py")
+                f"Додайте файл kps_*.npz до папки {DATA_DIR}.")
             return
 
         dlg_epochs = EpochsDialog(self, hand_name)

@@ -92,7 +92,7 @@ def build_fk_chain(urdf_path: str, link_names: list[str], pino_joint_names: list
 
 class KeypointsDataset(Dataset):
     """
-    Loads .npz files saved by collect_data.py (keypoints only, no qpos labels).
+    Loads .npz files with keypoints (keypoints only, no qpos labels).
     """
     def __init__(self, paths: list[str], kps_mean=None, kps_std=None):
         kps_list = []
